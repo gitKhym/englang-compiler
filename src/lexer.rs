@@ -7,7 +7,7 @@ pub struct Lexer {
     char: char,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum TokenType {
     Illegal,
     Eof,
@@ -15,7 +15,9 @@ pub enum TokenType {
     RCurl,
     LParen,
     RParen,
+    Assign,
     Eq,
+    Neq,
     Bang,
     Plus,
     Minus,
@@ -25,6 +27,10 @@ pub enum TokenType {
     Gt,
     Semi,
     Comma,
+    Digit,
+
+    Ident,
+    Let,
 }
 
 #[derive(Debug)]
@@ -53,7 +59,7 @@ impl Lexer {
 
     pub fn read_char(&mut self) {
         if self.peek_pos >= self.input.len() {
-            self.char = '0';
+            self.char = '\0';
             self.pos = self.peek_pos;
             return;
         } else {
@@ -67,26 +73,100 @@ impl Lexer {
         self.peek_pos += 1;
     }
 
-    pub fn get_token(&mut self) -> Token {
-        let token: Token;
-        match self.char {
-            '{' => token = Token::new(TokenType::LCurl, self.char.to_string()),
-            '}' => token = Token::new(TokenType::RCurl, self.char.to_string()),
-            '(' => token = Token::new(TokenType::LParen, self.char.to_string()),
-            ')' => token = Token::new(TokenType::RParen, self.char.to_string()),
-            '=' => token = Token::new(TokenType::Eq, self.char.to_string()),
-            '!' => token = Token::new(TokenType::Bang, self.char.to_string()),
-            '+' => token = Token::new(TokenType::Plus, self.char.to_string()),
-            '-' => token = Token::new(TokenType::Minus, self.char.to_string()),
-            '/' => token = Token::new(TokenType::Div, self.char.to_string()),
-            '*' => token = Token::new(TokenType::Mult, self.char.to_string()),
-            '<' => token = Token::new(TokenType::Lt, self.char.to_string()),
-            '>' => token = Token::new(TokenType::Gt, self.char.to_string()),
-            ';' => token = Token::new(TokenType::Semi, self.char.to_string()),
-            ',' => token = Token::new(TokenType::Comma, self.char.to_string()),
-            '0' => token = Token::new(TokenType::Eof, String::from("")),
-            _ => token = Token::new(TokenType::Illegal, self.char.to_string()),
+    pub fn peek_char(&mut self) -> char {
+        if self.peek_pos >= self.input.len() {
+            '0'
+        } else {
+            self.input
+                .chars()
+                .nth(self.peek_pos)
+                .expect("Index out of range")
         }
+    }
+
+    pub fn skip_whitespace(&mut self) {
+        while matches!(self.char, ' ' | '\t' | '\n' | '\r') {
+            self.read_char();
+        }
+    }
+
+    pub fn is_letter(&mut self) -> bool {
+        matches!(self.char, 'a'..='z' | 'A'..='Z')
+    }
+
+    pub fn is_digit(&mut self) -> bool {
+        matches!(self.char, '0'..='9')
+    }
+
+    pub fn read_number(&mut self) -> String {
+        let pos = self.pos;
+
+        while self.is_digit() {
+            self.read_char();
+        }
+
+        self.input[pos..self.pos].to_string()
+    }
+
+    pub fn read_identifier(&mut self) -> String {
+        let pos = self.pos;
+
+        while self.is_letter() {
+            self.read_char();
+        }
+
+        self.input[pos..self.pos].to_string()
+    }
+
+    pub fn determine_token_type(&mut self, input: &str) -> TokenType {
+        match input {
+            "let" => TokenType::Let,
+            _ => TokenType::Ident,
+        }
+    }
+
+    pub fn get_token(&mut self) -> Token {
+        self.skip_whitespace();
+
+        let token = match self.char {
+            '{' => Token::new(TokenType::LCurl, self.char.to_string()),
+            '}' => Token::new(TokenType::RCurl, self.char.to_string()),
+            '(' => Token::new(TokenType::LParen, self.char.to_string()),
+            ')' => Token::new(TokenType::RParen, self.char.to_string()),
+            '=' => Token::new(TokenType::Eq, self.char.to_string()),
+            '!' => {
+                if self.peek_char() == '=' {
+                    let first = self.char;
+                    self.read_char();
+                    let second = self.char;
+                    Token::new(TokenType::Neq, format!("{}{}", first, second))
+                } else {
+                    Token::new(TokenType::Bang, self.char.to_string())
+                }
+            }
+            '+' => Token::new(TokenType::Plus, self.char.to_string()),
+            '-' => Token::new(TokenType::Minus, self.char.to_string()),
+            '/' => Token::new(TokenType::Div, self.char.to_string()),
+            '*' => Token::new(TokenType::Mult, self.char.to_string()),
+            '<' => Token::new(TokenType::Lt, self.char.to_string()),
+            '>' => Token::new(TokenType::Gt, self.char.to_string()),
+            ';' => Token::new(TokenType::Semi, self.char.to_string()),
+            ',' => Token::new(TokenType::Comma, self.char.to_string()),
+            '\0' => Token::new(TokenType::Eof, "".to_string()),
+            _ => {
+                if self.is_letter() {
+                    let lexeme = self.read_identifier();
+                    let token_type = self.determine_token_type(&lexeme);
+                    return Token::new(token_type, lexeme);
+                } else if self.is_digit() {
+                    let lexeme = self.read_number();
+                    return Token::new(TokenType::Digit, lexeme);
+                } else {
+                    Token::new(TokenType::Illegal, self.char.to_string())
+                }
+            }
+        };
+
         self.read_char();
         token
     }
