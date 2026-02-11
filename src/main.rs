@@ -4,7 +4,9 @@ use std::{
     io::{BufRead, BufReader},
 };
 
+mod ast;
 mod lexer;
+mod parser;
 
 use lexer::{Lexer, TokenType};
 fn main() {

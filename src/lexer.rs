@@ -11,10 +11,15 @@ pub struct Lexer {
 pub enum TokenType {
     Illegal,
     Eof,
+    Ident,
+
+    // Symbols
     LCurl,
     RCurl,
     LParen,
     RParen,
+    LSquare,
+    RSquare,
     Assign,
     Eq,
     Neq,
@@ -27,10 +32,26 @@ pub enum TokenType {
     Gt,
     Semi,
     Comma,
+    Colon,
+    Dot,
+    DoubleQt,
+    SingleQt,
+
     Digit,
 
-    Ident,
+    // Keywords
     Let,
+    Return,
+    Fn,
+    Type(VarType),
+}
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub enum VarType {
+    String,
+    Int,
+    Float,
+    Bool,
 }
 
 #[derive(Debug)]
@@ -91,7 +112,7 @@ impl Lexer {
     }
 
     pub fn is_letter(&mut self) -> bool {
-        matches!(self.char, 'a'..='z' | 'A'..='Z')
+        matches!(self.char, 'a'..='z' | 'A'..='Z' | '_')
     }
 
     pub fn is_digit(&mut self) -> bool {
@@ -118,9 +139,19 @@ impl Lexer {
         self.input[pos..self.pos].to_string()
     }
 
+    pub fn read_string(&mut self) -> String {
+        todo!("Uhh idk if I should even have it here")
+    }
+
     pub fn determine_token_type(&mut self, input: &str) -> TokenType {
         match input {
             "let" => TokenType::Let,
+            "fn" => TokenType::Fn,
+            "return" => TokenType::Return,
+            "string" => TokenType::Type(VarType::String),
+            "int" => TokenType::Type(VarType::Int), // Maybe change to PrimInt for primitives later
+            "float" => TokenType::Type(VarType::Float),
+            "bool" => TokenType::Type(VarType::Bool),
             _ => TokenType::Ident,
         }
     }
@@ -133,7 +164,18 @@ impl Lexer {
             '}' => Token::new(TokenType::RCurl, self.char.to_string()),
             '(' => Token::new(TokenType::LParen, self.char.to_string()),
             ')' => Token::new(TokenType::RParen, self.char.to_string()),
-            '=' => Token::new(TokenType::Eq, self.char.to_string()),
+            '[' => Token::new(TokenType::LSquare, self.char.to_string()),
+            ']' => Token::new(TokenType::RSquare, self.char.to_string()),
+            '=' => {
+                if self.peek_char() == '=' {
+                    let first = self.char;
+                    self.read_char();
+                    let second = self.char;
+                    Token::new(TokenType::Eq, format!("{}{}", first, second))
+                } else {
+                    Token::new(TokenType::Assign, self.char.to_string())
+                }
+            }
             '!' => {
                 if self.peek_char() == '=' {
                     let first = self.char;
@@ -148,10 +190,14 @@ impl Lexer {
             '-' => Token::new(TokenType::Minus, self.char.to_string()),
             '/' => Token::new(TokenType::Div, self.char.to_string()),
             '*' => Token::new(TokenType::Mult, self.char.to_string()),
+            '"' => Token::new(TokenType::DoubleQt, self.char.to_string()),
+            '\'' => Token::new(TokenType::SingleQt, self.char.to_string()),
             '<' => Token::new(TokenType::Lt, self.char.to_string()),
             '>' => Token::new(TokenType::Gt, self.char.to_string()),
+            ':' => Token::new(TokenType::Colon, self.char.to_string()),
             ';' => Token::new(TokenType::Semi, self.char.to_string()),
             ',' => Token::new(TokenType::Comma, self.char.to_string()),
+            '.' => Token::new(TokenType::Dot, self.char.to_string()),
             '\0' => Token::new(TokenType::Eof, "".to_string()),
             _ => {
                 if self.is_letter() {
