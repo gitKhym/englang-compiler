@@ -1,42 +1,38 @@
 use crate::lexer::{Token, TokenType};
 
-pub struct Expr {}
-pub struct Stmt {}
-
-pub struct Identifier {
-    token: TokenType,
-    value: String,
-}
-
-// Root
+#[derive(Debug)]
 pub struct Program {
-    statements: Vec<Stmt>,
+    pub statements: Vec<Statement>,
 }
 
-// Expressions
-pub enum ExprKind {
-    Binary,
-    Unary,
-    FuncCall,
-    Int,
-    String,
-    Bool,
+#[derive(Debug)]
+pub enum Statement {
+    Illegal,
+    VarDecl(VarDeclStatement),
 }
 
+#[derive(Debug)]
+pub enum Expr {
+    Int(String),
+    BinaryExpr(BinaryExpr),
+}
+
+#[derive(Debug)]
+pub struct Identifier {
+    pub token_type: TokenType,
+    pub value: String,
+}
+
+#[derive(Debug)]
 pub struct BinaryExpr {
-    left: Expr,
-    token_type: TokenType,
-    right: Expr,
+    pub left: Box<Expr>,
+    pub operator: TokenType,
+    pub right: Box<Expr>,
 }
 
-// Statements
-pub enum StmtKind {
-    VarDecl,
-}
-
-// TYPE(VarType) ID EQ EXPR
-pub struct VarDeclStmt {
-    token: Token,
-    identifier: Identifier,
-    value: Expr,
+#[derive(Debug)]
+pub struct VarDeclStatement {
+    pub explicit_type: Token,
+    pub identifier: Identifier,
+    pub value: Expr,
 }
