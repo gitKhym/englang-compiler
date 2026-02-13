@@ -1,7 +1,7 @@
 use std::mem::replace;
 
 use crate::{
-    ast::{BinaryExpr, Expr, Identifier, Program, Statement, VarDeclStatement},
+    ast::{Expr, Identifier, Program, Statement, VarDeclStatement},
     lexer::{Lexer, Token, TokenType},
 };
 
@@ -22,13 +22,13 @@ impl Parser {
         parser
     }
 
-    pub fn get_token(&mut self) {
+    pub fn consume_token(&mut self) {
         self.curr_token = replace(&mut self.next_token, self.lexer.get_token());
     }
 
     pub fn expect(&mut self, token_type: TokenType) -> Result<(), &'static str> {
         if self.next_token.token_type == token_type {
-            self.get_token();
+            self.consume_token();
             Ok(())
         } else {
             Err("Unexpected token type")
@@ -43,10 +43,18 @@ impl Parser {
         while self.curr_token.token_type != TokenType::Eof {
             let statement = self.parse_statement();
             program.statements.push(statement);
-            self.get_token();
+            self.consume_token();
         }
 
         program
+    }
+
+    fn infix_binding_power(&mut self, op: &TokenType) -> (u8, u8) {
+        match op {
+            TokenType::Plus | TokenType::Minus => (1, 2),
+            TokenType::Mult | TokenType::Div => (3, 4),
+            _ => panic!("bad op: {:?}", op),
+        }
     }
 
     fn parse_statement(&mut self) -> Statement {
@@ -56,37 +64,46 @@ impl Parser {
         }
     }
 
-    fn parse_expression(&mut self) -> Option<Expr> {
-        let mut left = match self.curr_token.token_type {
+    fn parse_expression(&mut self, min_bp: u8) -> Expr {
+        let mut left = match &self.curr_token.token_type {
             TokenType::Digit => {
-                let value = self.curr_token.lexeme.clone();
-                self.get_token();
-                Expr::Int(value)
+                let lexeme = self.curr_token.lexeme.clone();
+                self.consume_token(); // consume digit
+                Expr::Atom(lexeme)
             }
-            _ => return None,
+            TokenType::LParen => {
+                self.consume_token(); // consume (
+
+                let expr = self.parse_expression(0);
+
+                assert_eq!(self.curr_token.token_type, TokenType::RParen);
+                self.consume_token(); // consume )
+
+                expr
+            }
+            token => panic!("bad token: {:?}", token),
         };
 
-        while self.curr_token.token_type == TokenType::Plus {
-            let operator = self.curr_token.token_type.clone();
-            self.get_token();
-
-            let right = match self.curr_token.token_type {
-                TokenType::Digit => {
-                    let value = self.curr_token.lexeme.clone();
-                    self.get_token();
-                    Expr::Int(value)
+        loop {
+            let op = match &self.curr_token.token_type {
+                TokenType::Eof | TokenType::Semi | TokenType::RParen => break,
+                TokenType::Plus | TokenType::Minus | TokenType::Div | TokenType::Mult => {
+                    self.curr_token.token_type
                 }
-                _ => return None,
+                token => panic!("bad token: {:?}", token),
             };
 
-            left = Expr::BinaryExpr(BinaryExpr {
-                left: Box::new(left),
-                operator,
-                right: Box::new(right),
-            });
-        }
+            let (l_bp, r_bp) = self.infix_binding_power(&op);
+            if l_bp < min_bp {
+                break;
+            }
 
-        Some(left)
+            self.consume_token();
+            let right = self.parse_expression(r_bp);
+
+            left = Expr::Op(op, vec![left, right])
+        }
+        left
     }
 
     fn parse_var_decl_statement(&mut self) -> Statement {
@@ -97,7 +114,7 @@ impl Parser {
         }
 
         let identifier = Identifier {
-            token_type: self.curr_token.token_type.clone(),
+            token_type: self.curr_token.token_type,
             value: self.curr_token.lexeme.clone(),
         };
 
@@ -105,21 +122,18 @@ impl Parser {
             return Statement::Illegal;
         }
 
-        self.get_token(); // Advance to the expression
+        self.consume_token(); // Advance to the expression
 
-        let value = match self.parse_expression() {
-            Some(expr) => expr,
-            None => return Statement::Illegal,
-        };
+        let expression = self.parse_expression(1);
 
         let decl = VarDeclStatement {
             explicit_type,
             identifier,
-            value,
+            expression,
         };
 
         if self.next_token.token_type == TokenType::Semi {
-            self.get_token();
+            self.consume_token();
         }
 
         Statement::VarDecl(decl)

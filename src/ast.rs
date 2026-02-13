@@ -12,27 +12,21 @@ pub enum Statement {
 }
 
 #[derive(Debug)]
-pub enum Expr {
-    Int(String),
-    BinaryExpr(BinaryExpr),
-}
-
-#[derive(Debug)]
 pub struct Identifier {
     pub token_type: TokenType,
     pub value: String,
 }
 
+// Basically an AST Node (through my understanding atleast)
 #[derive(Debug)]
-pub struct BinaryExpr {
-    pub left: Box<Expr>,
-    pub operator: TokenType,
-    pub right: Box<Expr>,
+pub enum Expr {
+    Atom(String),
+    Op(TokenType, Vec<Expr>),
 }
 
 #[derive(Debug)]
 pub struct VarDeclStatement {
     pub explicit_type: Token,
     pub identifier: Identifier,
-    pub value: Expr,
+    pub expression: Expr,
 }
