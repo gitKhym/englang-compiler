@@ -43,6 +43,8 @@ pub enum TokenType {
     Let,
     Return,
     Fn,
+    If,
+    Else,
     Type(VarType),
 }
 
@@ -96,7 +98,7 @@ impl Lexer {
 
     pub fn peek_char(&mut self) -> char {
         if self.peek_pos >= self.input.len() {
-            '0'
+            '\0'
         } else {
             self.input
                 .chars()
@@ -139,15 +141,17 @@ impl Lexer {
         self.input[pos..self.pos].to_string()
     }
 
-    pub fn read_string(&mut self) -> String {
-        todo!("Uhh idk if I should even have it here")
-    }
+    // pub fn read_string(&mut self) -> String {
+    //     todo!("Uhh idk if I should even have it here")
+    // }
 
     pub fn determine_token_type(&mut self, input: &str) -> TokenType {
         match input {
             "let" => TokenType::Let,
             "fn" => TokenType::Fn,
             "return" => TokenType::Return,
+            "if" => TokenType::If,
+            "else" => TokenType::Else,
             "string" => TokenType::Type(VarType::String),
             "int" => TokenType::Type(VarType::Int), // Maybe change to PrimInt for primitives later
             "float" => TokenType::Type(VarType::Float),

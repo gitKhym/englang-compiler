@@ -1,4 +1,4 @@
-use crate::lexer::{Token, TokenType};
+use crate::lexer::{Token, TokenType, VarType};
 
 #[derive(Debug)]
 pub struct Program {
@@ -9,6 +9,8 @@ pub struct Program {
 pub enum Statement {
     Illegal,
     VarDecl(VarDeclStatement),
+    Return(ReturnStatement),
+    If(IfStatement),
 }
 
 #[derive(Debug)]
@@ -25,8 +27,25 @@ pub enum Expr {
 }
 
 #[derive(Debug)]
+pub struct BlockStatement {
+    pub statements: Vec<Statement>,
+}
+
+#[derive(Debug)]
 pub struct VarDeclStatement {
-    pub explicit_type: Token,
+    pub explicit_type: VarType,
     pub identifier: Identifier,
     pub expression: Expr,
+}
+
+#[derive(Debug)]
+pub struct ReturnStatement {
+    pub expression: Expr,
+}
+
+#[derive(Debug)]
+pub struct IfStatement {
+    pub condition: Expr,
+    pub consequence: BlockStatement,
+    pub alternative: BlockStatement,
 }

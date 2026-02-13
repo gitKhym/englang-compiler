@@ -1,8 +1,11 @@
 use std::mem::replace;
 
 use crate::{
-    ast::{Expr, Identifier, Program, Statement, VarDeclStatement},
-    lexer::{Lexer, Token, TokenType},
+    ast::{
+        BlockStatement, Expr, Identifier, IfStatement, Program, ReturnStatement, Statement,
+        VarDeclStatement,
+    },
+    lexer::{Lexer, Token, TokenType, VarType},
 };
 
 pub struct Parser {
@@ -26,12 +29,16 @@ impl Parser {
         self.curr_token = replace(&mut self.next_token, self.lexer.get_token());
     }
 
-    pub fn expect(&mut self, token_type: TokenType) -> Result<(), &'static str> {
-        if self.next_token.token_type == token_type {
+    pub fn expect(&mut self, token_type: TokenType) -> Result<Token, String> {
+        if self.curr_token.token_type == token_type {
+            let old_token = self.curr_token.clone();
             self.consume_token();
-            Ok(())
+            Ok(old_token)
         } else {
-            Err("Unexpected token type")
+            Err(format!(
+                "Expected {:?}, but found {:?}",
+                token_type, self.curr_token.token_type
+            ))
         }
     }
 
@@ -42,8 +49,12 @@ impl Parser {
 
         while self.curr_token.token_type != TokenType::Eof {
             let statement = self.parse_statement();
-            program.statements.push(statement);
-            self.consume_token();
+
+            if !matches!(statement, Statement::Illegal) {
+                program.statements.push(statement);
+            } else {
+                self.consume_token();
+            }
         }
 
         program
@@ -57,16 +68,9 @@ impl Parser {
         }
     }
 
-    fn parse_statement(&mut self) -> Statement {
-        match self.curr_token.token_type {
-            TokenType::Type(_) => self.parse_var_decl_statement(),
-            _ => Statement::Illegal,
-        }
-    }
-
     fn parse_expression(&mut self, min_bp: u8) -> Expr {
         let mut left = match &self.curr_token.token_type {
-            TokenType::Digit => {
+            TokenType::Digit | TokenType::Ident => {
                 let lexeme = self.curr_token.lexeme.clone();
                 self.consume_token(); // consume digit
                 Expr::Atom(lexeme)
@@ -106,36 +110,143 @@ impl Parser {
         left
     }
 
-    fn parse_var_decl_statement(&mut self) -> Statement {
-        let explicit_type = self.curr_token.clone();
+    // STATEMENTS
 
-        if self.expect(TokenType::Ident).is_err() {
-            return Statement::Illegal;
+    fn parse_statement(&mut self) -> Statement {
+        match self.curr_token.token_type {
+            TokenType::Type(_) => self.parse_var_decl_statement(),
+            TokenType::Return => self.parse_return_statement(),
+            TokenType::If => self.parse_if_statement(),
+            _ => Statement::Illegal,
+        }
+    }
+
+    fn parse_block_statement(&mut self) -> BlockStatement {
+        if self.expect(TokenType::LCurl).is_err() {
+            panic!(
+                "Expected: {:#?}, got: {:#?}",
+                TokenType::LCurl,
+                self.curr_token.token_type
+            )
         }
 
-        let identifier = Identifier {
-            token_type: self.curr_token.token_type,
-            value: self.curr_token.lexeme.clone(),
+        let mut block_statement = BlockStatement {
+            statements: Vec::new(),
         };
 
+        while self.curr_token.token_type != TokenType::RCurl {
+            let statement = self.parse_statement();
+
+            if matches!(statement, Statement::Illegal) {
+                panic!("Expected a statement, got {:#?}", statement)
+            }
+            block_statement.statements.push(statement);
+        }
+
+        self.consume_token();
+
+        block_statement
+    }
+
+    // ReturnStatement: RETURN EXPR
+    fn parse_return_statement(&mut self) -> Statement {
+        self.consume_token(); // Consume return
+
+        let statement = Statement::Return(ReturnStatement {
+            expression: self.parse_expression(0),
+        });
+
+        match self.expect(TokenType::Semi) {
+            Ok(_) => statement,
+            Err(_) => Statement::Illegal,
+        }
+    }
+
+    // IfStatement: IF LPAREN EXPR RPAREN BlockStatement ELSE BlockStatement
+    fn parse_if_statement(&mut self) -> Statement {
+        // IF
+        self.consume_token();
+
+        // LPAREN
+        if self.expect(TokenType::LParen).is_err() {
+            panic!(
+                "Expected: {:#?}, got: {:#?}",
+                TokenType::LParen,
+                self.curr_token.token_type
+            )
+        }
+
+        // EXPR
+        let expression = self.parse_expression(0);
+
+        // RPAREN
+        if self.expect(TokenType::RParen).is_err() {
+            panic!(
+                "Expected: {:#?}, got: {:#?}",
+                TokenType::RParen,
+                self.curr_token.token_type
+            )
+        }
+
+        // BlockStatement
+        let consequence = self.parse_block_statement();
+
+        if self.expect(TokenType::Else).is_err() {
+            panic!(
+                "Expected: {:#?}, got: {:#?}",
+                TokenType::Else,
+                self.curr_token.token_type
+            )
+        }
+
+        let alternative = self.parse_block_statement();
+
+        let statement = Statement::If(IfStatement {
+            condition: expression,
+            consequence,
+            alternative,
+        });
+
+        statement
+    }
+
+    // VarDeclStatement: TYPE IDENT ASSIGN EXPR
+    fn parse_var_decl_statement(&mut self) -> Statement {
+        // TYPE
+        let explicit_type = match self.curr_token.token_type {
+            TokenType::Type(var_type) => {
+                self.consume_token();
+                var_type
+            }
+            _ => return Statement::Illegal,
+        };
+
+        // IDENT
+        let identifier = match self.expect(TokenType::Ident) {
+            Ok(identifier) => identifier.clone(),
+            Err(_) => return Statement::Illegal,
+        };
+
+        // ASSIGN
         if self.expect(TokenType::Assign).is_err() {
             return Statement::Illegal;
         }
 
-        self.consume_token(); // Advance to the expression
+        // EXPR
+        let expression = self.parse_expression(0);
 
-        let expression = self.parse_expression(1);
-
-        let decl = VarDeclStatement {
+        let var_decl_statement = Statement::VarDecl(VarDeclStatement {
             explicit_type,
-            identifier,
+            identifier: Identifier {
+                token_type: identifier.token_type,
+                value: identifier.lexeme,
+            },
             expression,
-        };
+        });
 
-        if self.next_token.token_type == TokenType::Semi {
-            self.consume_token();
+        match self.expect(TokenType::Semi) {
+            Ok(_) => var_decl_statement,
+            Err(_) => Statement::Illegal,
         }
-
-        Statement::VarDecl(decl)
     }
 }
