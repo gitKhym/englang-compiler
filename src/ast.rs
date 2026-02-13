@@ -11,19 +11,26 @@ pub enum Statement {
     VarDecl(VarDeclStatement),
     Return(ReturnStatement),
     If(IfStatement),
-}
-
-#[derive(Debug)]
-pub struct Identifier {
-    pub token_type: TokenType,
-    pub value: String,
+    Expression(Box<Expr>),
 }
 
 // Basically an AST Node (through my understanding atleast)
 #[derive(Debug)]
 pub enum Expr {
     Atom(String),
-    Op(TokenType, Vec<Expr>),
+    Bool(bool),
+    BinOp {
+        op: TokenType,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    UnOp(TokenType, Box<Expr>),
+}
+
+#[derive(Debug)]
+pub struct Identifier {
+    pub token_type: TokenType,
+    pub value: String,
 }
 
 #[derive(Debug)]
@@ -35,17 +42,17 @@ pub struct BlockStatement {
 pub struct VarDeclStatement {
     pub explicit_type: VarType,
     pub identifier: Identifier,
-    pub expression: Expr,
+    pub expression: Box<Expr>,
 }
 
 #[derive(Debug)]
 pub struct ReturnStatement {
-    pub expression: Expr,
+    pub expression: Box<Expr>,
 }
 
 #[derive(Debug)]
 pub struct IfStatement {
-    pub condition: Expr,
+    pub condition: Box<Expr>,
     pub consequence: BlockStatement,
-    pub alternative: BlockStatement,
+    pub alternative: Option<BlockStatement>,
 }

@@ -40,7 +40,8 @@ pub enum TokenType {
     Digit,
 
     // Keywords
-    Let,
+    True,
+    False,
     Return,
     Fn,
     If,
@@ -54,6 +55,7 @@ pub enum VarType {
     Int,
     Float,
     Bool,
+    Any,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -147,7 +149,8 @@ impl Lexer {
 
     pub fn determine_token_type(&mut self, input: &str) -> TokenType {
         match input {
-            "let" => TokenType::Let,
+            "True" => TokenType::True,
+            "False" => TokenType::False,
             "fn" => TokenType::Fn,
             "return" => TokenType::Return,
             "if" => TokenType::If,
