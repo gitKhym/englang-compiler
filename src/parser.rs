@@ -2,8 +2,8 @@ use std::mem::replace;
 
 use crate::{
     ast::{
-        BlockStatement, Expr, Identifier, IfStatement, Program, ReturnStatement, Statement,
-        VarDeclStatement,
+        BinOpExpr, BlockStatement, Expr, FuncCallExpr, FuncDefExpr, FuncDefStatement, IfStatement,
+        Program, ReturnStatement, Statement, UnOpExpr, VarDeclStatement,
     },
     lexer::{Lexer, Token, TokenType, VarType},
 };
@@ -50,6 +50,25 @@ impl Parser {
         }
     }
 
+    fn expect_type(&mut self) -> VarType {
+        if let TokenType::Type(var_type) = self.curr_token.token_type {
+            self.consume_token();
+            var_type
+        } else {
+            panic!("Expected type, got {:?}", self.curr_token.token_type);
+        }
+    }
+
+    fn expect_ident(&mut self) -> String {
+        if let TokenType::Ident = self.curr_token.token_type {
+            let lexeme = self.curr_token.lexeme.clone();
+            self.consume_token();
+            lexeme
+        } else {
+            panic!("Expected identifier, got {:?}", self.curr_token.token_type);
+        }
+    }
+
     pub fn parse_program(&mut self) -> Program {
         let mut program = Program {
             statements: Vec::new(),
@@ -86,11 +105,39 @@ impl Parser {
 
     fn parse_expression(&mut self, min_bp: u8) -> Box<Expr> {
         let mut left: Box<Expr> = match &self.curr_token.token_type {
-            TokenType::Digit | TokenType::Ident => {
-                let lexeme = self.curr_token.lexeme.clone();
-                self.consume_token(); // consume digit
-                Box::new(Expr::Atom(lexeme))
+            TokenType::Fn => Box::new(self.parse_function_def_expression()),
+
+            TokenType::Ident => {
+                let identifier = self.curr_token.lexeme.clone();
+                self.consume_token();
+
+                // TODO:Function Calls
+                if self.curr_token_is(TokenType::LParen) {
+                    // It's a function call!
+
+                    self.consume_token();
+                    let mut args = Vec::new();
+
+                    while !self.curr_token_is(TokenType::RParen) {
+                        let arg = self.parse_expression(0);
+                        args.push(*arg); // unbox
+
+                        if self.curr_token_is(TokenType::Comma) {
+                            self.consume_token(); // consume ,
+                        } else {
+                            break;
+                        }
+                    }
+
+                    self.expect(TokenType::RParen).unwrap(); // consume )
+
+                    Box::new(Expr::FuncCall(FuncCallExpr { identifier, args }))
+                } else {
+                    Box::new(Expr::Ident(identifier))
+                }
             }
+
+            TokenType::Digit => Box::new(self.parse_int_expression()),
 
             TokenType::True => {
                 self.consume_token(); // consume True
@@ -120,7 +167,7 @@ impl Parser {
                 let ((), r_bp) = self.prefix_binding_power(&op);
                 let right = self.parse_expression(r_bp);
 
-                Box::new(Expr::UnOp(op, right))
+                Box::new(Expr::UnOp(UnOpExpr { op, expr: right }))
             }
 
             token => panic!("bad token: {:?}", token),
@@ -135,7 +182,7 @@ impl Parser {
                 | TokenType::Mult
                 | TokenType::Eq
                 | TokenType::Neq => self.curr_token.token_type,
-                token => panic!("bad token: {:?}", token),
+                _ => break,
             };
 
             let (l_bp, r_bp) = self.infix_binding_power(&op);
@@ -146,18 +193,101 @@ impl Parser {
             self.consume_token();
             let right = self.parse_expression(r_bp);
 
-            left = Box::new(Expr::BinOp { op, left, right })
+            left = Box::new(Expr::BinOp(BinOpExpr { op, left, right }))
         }
         left
     }
 
-    // STATEMENTS
+    fn parse_int_expression(&mut self) -> Expr {
+        let int: i64 = self.curr_token.lexeme.parse().expect("Unexpected string");
 
+        self.consume_token();
+
+        Expr::Int(int)
+    }
+
+    fn parse_param(&mut self) -> VarDeclStatement {
+        let explicit_type = match self.curr_token.token_type {
+            TokenType::Type(var_type) => {
+                self.consume_token();
+                var_type
+            }
+            _ => panic!("Expected type in parameter"),
+        };
+
+        let identifier = match self.expect(TokenType::Ident) {
+            Ok(identifier) => identifier.lexeme,
+            Err(e) => panic!("{e}"),
+        };
+
+        VarDeclStatement {
+            explicit_type,
+            identifier,
+            expression: None,
+        }
+    }
+
+    // FuncDefExpr: FN LPAREN VARDECL[] RPAREN RARROW BLOCKSTATEMENT
+    fn parse_function_def_expression(&mut self) -> Expr {
+        // FN
+        self.consume_token();
+
+        // LPAREN
+        match self.expect(TokenType::LParen) {
+            Ok(_) => {}
+            Err(e) => panic!("{e}"),
+        };
+
+        // VARDECL[]
+        let mut args: Vec<VarDeclStatement> = Vec::new();
+        while !self.curr_token_is(TokenType::RParen) {
+            let param = self.parse_param();
+            args.push(param);
+
+            match self.expect(TokenType::Comma) {
+                Ok(_) => continue,
+                Err(_) => break,
+            };
+        }
+
+        // RPAREN
+        match self.expect(TokenType::RParen) {
+            Ok(_) => {}
+            Err(e) => panic!("{e}"),
+        };
+
+        // RARROW
+        match self.expect(TokenType::Rarrow) {
+            Ok(_) => {}
+            Err(e) => panic!("{e}"),
+        };
+
+        let return_type = self.expect_type();
+
+        let function_block = self.parse_block_statement();
+
+        Expr::FuncDef(FuncDefExpr {
+            args,
+            return_type,
+            function_block,
+        })
+    }
+    // fn parse_function_call(&mut self) -> Expr {}
+
+    // STATEMENTS
     fn parse_statement(&mut self) -> Statement {
         match self.curr_token.token_type {
             TokenType::Type(_) => self.parse_var_decl_statement(),
             TokenType::Return => self.parse_return_statement(),
             TokenType::If => self.parse_if_statement(),
+            TokenType::Fn => {
+                if self.next_token_is(TokenType::Ident) {
+                    self.parse_function_def_statement()
+                } else {
+                    let expr = self.parse_expression(0);
+                    Statement::Expression(expr)
+                }
+            }
             _ => Statement::Illegal,
         }
     }
@@ -258,45 +388,70 @@ impl Parser {
     // VarDeclStatement: TYPE IDENT ASSIGN EXPR
     fn parse_var_decl_statement(&mut self) -> Statement {
         // TYPE
-        let explicit_type = match self.curr_token.token_type {
-            TokenType::Type(var_type) => {
-                self.consume_token();
-                var_type
-            }
-            _ => panic!(
-                "Expected: {:#?}, got: {:#?}",
-                TokenType::Type(VarType::Any),
-                self.curr_token
-            ),
-        };
+        let explicit_type = self.expect_type();
 
         // IDENT
+        let identifier = self.expect_ident();
+
+        // ASSIGN?
+        let expression = if self.curr_token_is(TokenType::Assign) {
+            self.consume_token();
+            Some(self.parse_expression(0))
+        } else {
+            None
+        };
+
+        Statement::VarDecl(VarDeclStatement {
+            explicit_type,
+            identifier,
+            expression,
+        })
+    }
+
+    // FuncDefStatement: FN IDENT LPAREN VARDECL[] RPAREN RARROW BLOCKSTATEMENT
+    fn parse_function_def_statement(&mut self) -> Statement {
+        self.consume_token(); // Consume FN
+
         let identifier = match self.expect(TokenType::Ident) {
-            Ok(identifier) => identifier.clone(),
+            Ok(identifier) => identifier.lexeme.clone(),
             Err(e) => panic!("{e}"),
         };
 
-        // ASSIGN
-        match self.expect(TokenType::Assign) {
+        match self.expect(TokenType::LParen) {
             Ok(_) => {}
             Err(e) => panic!("{e}"),
         };
 
-        // EXPR
-        let expression = self.parse_expression(0);
+        let mut args: Vec<VarDeclStatement> = Vec::new();
+        while !self.curr_token_is(TokenType::RParen) {
+            let param = self.parse_param();
+            args.push(param);
 
-        let var_decl_statement = Statement::VarDecl(VarDeclStatement {
-            explicit_type,
-            identifier: Identifier {
-                token_type: identifier.token_type,
-                value: identifier.lexeme,
-            },
-            expression,
-        });
-
-        match self.expect(TokenType::Semi) {
-            Ok(_) => var_decl_statement,
-            Err(_) => Statement::Illegal,
+            match self.expect(TokenType::Comma) {
+                Ok(_) => continue,
+                Err(_) => break,
+            };
         }
+
+        match self.expect(TokenType::RParen) {
+            Ok(_) => {}
+            Err(e) => panic!("{e}"),
+        };
+
+        match self.expect(TokenType::Rarrow) {
+            Ok(_) => {}
+            Err(e) => panic!("{e}"),
+        };
+
+        let return_type = self.expect_type();
+
+        let function_block = self.parse_block_statement();
+
+        Statement::FuncDef(FuncDefStatement {
+            identifier,
+            args,
+            return_type,
+            function_block,
+        })
     }
 }

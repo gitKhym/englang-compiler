@@ -30,6 +30,7 @@ pub enum TokenType {
     Mult,
     Lt,
     Gt,
+    Rarrow,
     Semi,
     Comma,
     Colon,
@@ -194,7 +195,16 @@ impl Lexer {
                 }
             }
             '+' => Token::new(TokenType::Plus, self.char.to_string()),
-            '-' => Token::new(TokenType::Minus, self.char.to_string()),
+            '-' => {
+                if self.peek_char() == '>' {
+                    let first = self.char;
+                    self.read_char();
+                    let second = self.char;
+                    Token::new(TokenType::Rarrow, format!("{}{}", first, second))
+                } else {
+                    Token::new(TokenType::Minus, self.char.to_string())
+                }
+            }
             '/' => Token::new(TokenType::Div, self.char.to_string()),
             '*' => Token::new(TokenType::Mult, self.char.to_string()),
             '"' => Token::new(TokenType::DoubleQt, self.char.to_string()),
