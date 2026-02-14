@@ -32,27 +32,7 @@ cargo run -- test.eng
 
 ## Visualizing the AST
 
-To visualize the generated AST, you'll need to have Graphviz installed.
-
-### Installation
-
-*   **Arch Linux:**
-    ```bash
-    sudo pacman -S graphviz
-    ```
-*   **Ubuntu/Debian:**
-    ```bash
-    sudo apt-get update
-    sudo apt-get install graphviz
-    ```
-*   **macOS (using Homebrew):**
-    ```bash
-    brew install graphviz
-    ```
-*   **Windows (using Chocolatey):**
-    ```powershell
-    choco install graphviz
-    ```
+To visualize the generated AST, you'll need to have Graphviz installed. You can find installation instructions on the official [Graphviz website](https://graphviz.org).
 
 ### Generating the image
 
@@ -64,7 +44,19 @@ dot -Tpng ast.dot -o ast.png
 
 ### Sample AST
 
+
 ![Sample AST](sample_ast.png)
 
-This will generate an Abstract Syntax Tree (AST) of your code to a .dot format using the Dot crate. In the future I want to expand this language by adding semantic analysis and an interpreter.
+This is the generated AST from this sample code.
+```eng
+fn main() -> void {
+  int x = 5;
+  int y = 2 + 4 - (-2 * 3);
 
+  fn add(int a, int b) -> int {
+    return a + b;
+  }
+
+  print(add(x,y));
+}
+```
