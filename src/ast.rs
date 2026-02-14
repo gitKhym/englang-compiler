@@ -8,6 +8,7 @@ pub struct Program {
 // Expressions
 #[derive(Debug)]
 pub enum Expr {
+    Null,
     Int(i64),
     Ident(String),
     Bool(bool),

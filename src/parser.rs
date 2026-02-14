@@ -1,3 +1,4 @@
+use core::panic;
 use std::mem::replace;
 
 use crate::{
@@ -119,6 +120,11 @@ impl Parser {
             }
 
             TokenType::Digit => Box::new(self.parse_int_expression()),
+
+            TokenType::Null => {
+                self.expect(TokenType::Null).unwrap();
+                Box::new(Expr::Null)
+            }
 
             TokenType::True => {
                 self.expect(TokenType::True).unwrap();
@@ -282,7 +288,7 @@ impl Parser {
                 }
                 stmt
             }
-            _ => Statement::Illegal,
+            _ => panic!("Unexpected Token"),
         }
     }
 

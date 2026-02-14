@@ -41,6 +41,7 @@ pub enum TokenType {
     Digit,
 
     // Keywords
+    Null,
     True,
     False,
     Return,
@@ -157,6 +158,7 @@ impl Lexer {
             "return" => TokenType::Return,
             "if" => TokenType::If,
             "else" => TokenType::Else,
+            "null" => TokenType::Null,
             "void" => TokenType::Type(VarType::Void),
             "string" => TokenType::Type(VarType::String),
             "int" => TokenType::Type(VarType::Int), // Maybe change to PrimInt for primitives later
