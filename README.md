@@ -61,5 +61,10 @@ Once Graphviz is installed, you can generate a PNG image from the `ast.dot` file
 ```bash
 dot -Tpng ast.dot -o ast.png
 ```
+
+### Sample AST
+
+![Sample AST](sample_ast.png)
+
 This will generate an Abstract Syntax Tree (AST) of your code to a .dot format using the Dot crate. In the future I want to expand this language by adding semantic analysis and an interpreter.
 
