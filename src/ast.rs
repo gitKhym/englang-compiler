@@ -44,7 +44,7 @@ pub struct FuncDefExpr {
 #[derive(Debug)]
 pub struct FuncCallExpr {
     pub identifier: String,
-    pub args: Vec<Expr>,
+    pub args: Vec<Box<Expr>>,
 }
 
 // Block statement

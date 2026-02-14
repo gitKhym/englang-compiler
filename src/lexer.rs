@@ -52,6 +52,7 @@ pub enum TokenType {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum VarType {
+    Void,
     String,
     Int,
     Float,
@@ -156,6 +157,7 @@ impl Lexer {
             "return" => TokenType::Return,
             "if" => TokenType::If,
             "else" => TokenType::Else,
+            "void" => TokenType::Type(VarType::Void),
             "string" => TokenType::Type(VarType::String),
             "int" => TokenType::Type(VarType::Int), // Maybe change to PrimInt for primitives later
             "float" => TokenType::Type(VarType::Float),

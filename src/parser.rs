@@ -25,6 +25,10 @@ impl Parser {
         parser
     }
 
+    pub fn _print_token(&self) {
+        println!("{:#?}", self.curr_token)
+    }
+
     pub fn consume_token(&mut self) {
         self.curr_token = replace(&mut self.next_token, self.lexer.get_token());
     }
@@ -50,7 +54,7 @@ impl Parser {
         }
     }
 
-    fn expect_type(&mut self) -> VarType {
+    fn consume_var_type(&mut self) -> VarType {
         if let TokenType::Type(var_type) = self.curr_token.token_type {
             self.consume_token();
             var_type
@@ -59,7 +63,7 @@ impl Parser {
         }
     }
 
-    fn expect_ident(&mut self) -> String {
+    fn consume_ident(&mut self) -> String {
         if let TokenType::Ident = self.curr_token.token_type {
             let lexeme = self.curr_token.lexeme.clone();
             self.consume_token();
@@ -106,56 +110,33 @@ impl Parser {
     fn parse_expression(&mut self, min_bp: u8) -> Box<Expr> {
         let mut left: Box<Expr> = match &self.curr_token.token_type {
             TokenType::Fn => Box::new(self.parse_function_def_expression()),
-
             TokenType::Ident => {
-                let identifier = self.curr_token.lexeme.clone();
-                self.consume_token();
-
-                // TODO:Function Calls
-                if self.curr_token_is(TokenType::LParen) {
-                    // It's a function call!
-
-                    self.consume_token();
-                    let mut args = Vec::new();
-
-                    while !self.curr_token_is(TokenType::RParen) {
-                        let arg = self.parse_expression(0);
-                        args.push(*arg); // unbox
-
-                        if self.curr_token_is(TokenType::Comma) {
-                            self.consume_token(); // consume ,
-                        } else {
-                            break;
-                        }
-                    }
-
-                    self.expect(TokenType::RParen).unwrap(); // consume )
-
-                    Box::new(Expr::FuncCall(FuncCallExpr { identifier, args }))
+                if self.next_token_is(TokenType::LParen) {
+                    Box::new(self.parse_function_call_expression())
                 } else {
-                    Box::new(Expr::Ident(identifier))
+                    Box::new(Expr::Ident(self.consume_ident()))
                 }
             }
 
             TokenType::Digit => Box::new(self.parse_int_expression()),
 
             TokenType::True => {
-                self.consume_token(); // consume True
+                self.expect(TokenType::True).unwrap();
                 Box::new(Expr::Bool(true))
             }
 
             TokenType::False => {
-                self.consume_token(); // consume False
+                self.expect(TokenType::False).unwrap();
                 Box::new(Expr::Bool(false))
             }
 
             TokenType::LParen => {
-                self.consume_token(); // consume (
+                self.expect(TokenType::LParen).unwrap();
 
                 let expr = self.parse_expression(0);
 
                 assert_eq!(self.curr_token.token_type, TokenType::RParen);
-                self.consume_token(); // consume )
+                self.expect(TokenType::RParen).unwrap();
 
                 expr
             }
@@ -206,19 +187,10 @@ impl Parser {
         Expr::Int(int)
     }
 
-    fn parse_param(&mut self) -> VarDeclStatement {
-        let explicit_type = match self.curr_token.token_type {
-            TokenType::Type(var_type) => {
-                self.consume_token();
-                var_type
-            }
-            _ => panic!("Expected type in parameter"),
-        };
-
-        let identifier = match self.expect(TokenType::Ident) {
-            Ok(identifier) => identifier.lexeme,
-            Err(e) => panic!("{e}"),
-        };
+    // VarDeclStatement(Params): VARTYPE IDENT
+    fn parse_function_def_param(&mut self) -> VarDeclStatement {
+        let explicit_type = self.consume_var_type();
+        let identifier = self.consume_ident();
 
         VarDeclStatement {
             explicit_type,
@@ -230,31 +202,22 @@ impl Parser {
     // FuncDefExpr: FN LPAREN VARDECL[] RPAREN RARROW BLOCKSTATEMENT
     fn parse_function_def_expression(&mut self) -> Expr {
         // FN
-        self.consume_token();
+        self.expect(TokenType::Fn).unwrap();
 
         // LPAREN
-        match self.expect(TokenType::LParen) {
-            Ok(_) => {}
-            Err(e) => panic!("{e}"),
-        };
+        self.expect(TokenType::LParen).unwrap();
 
-        // VARDECL[]
         let mut args: Vec<VarDeclStatement> = Vec::new();
-        while !self.curr_token_is(TokenType::RParen) {
-            let param = self.parse_param();
-            args.push(param);
-
-            match self.expect(TokenType::Comma) {
-                Ok(_) => continue,
-                Err(_) => break,
-            };
+        if !self.curr_token_is(TokenType::RParen) {
+            args.push(self.parse_function_def_param());
+            while self.curr_token_is(TokenType::Comma) {
+                self.consume_token();
+                args.push(self.parse_function_def_param());
+            }
         }
 
         // RPAREN
-        match self.expect(TokenType::RParen) {
-            Ok(_) => {}
-            Err(e) => panic!("{e}"),
-        };
+        self.expect(TokenType::RParen).unwrap();
 
         // RARROW
         match self.expect(TokenType::Rarrow) {
@@ -262,7 +225,7 @@ impl Parser {
             Err(e) => panic!("{e}"),
         };
 
-        let return_type = self.expect_type();
+        let return_type = self.consume_var_type();
 
         let function_block = self.parse_block_statement();
 
@@ -272,7 +235,29 @@ impl Parser {
             function_block,
         })
     }
-    // fn parse_function_call(&mut self) -> Expr {}
+    fn parse_function_call_expression(&mut self) -> Expr {
+        let identifier = self.consume_ident(); // Consume IDENT
+
+        self.expect(TokenType::LParen).unwrap(); // Consume LPAREN
+
+        let mut args: Vec<Box<Expr>> = Vec::new();
+
+        if self.curr_token_is(TokenType::RParen) {
+            self.consume_token(); // consume RParen
+            return Expr::FuncCall(FuncCallExpr { identifier, args });
+        }
+
+        args.push(self.parse_expression(0));
+
+        while self.curr_token_is(TokenType::Comma) {
+            self.expect(TokenType::Comma).unwrap(); // consume comma
+            args.push(self.parse_expression(0));
+        }
+
+        self.expect(TokenType::RParen).unwrap(); // Consume RPAREN
+
+        Expr::FuncCall(FuncCallExpr { identifier, args })
+    }
 
     // STATEMENTS
     fn parse_statement(&mut self) -> Statement {
@@ -281,12 +266,21 @@ impl Parser {
             TokenType::Return => self.parse_return_statement(),
             TokenType::If => self.parse_if_statement(),
             TokenType::Fn => {
+                // FN IDENT => FunctionDefStatement
                 if self.next_token_is(TokenType::Ident) {
                     self.parse_function_def_statement()
                 } else {
+                    // FN => FunctionDefExpression
                     let expr = self.parse_expression(0);
                     Statement::Expression(expr)
                 }
+            }
+            TokenType::Ident => {
+                let stmt = Statement::Expression(self.parse_expression(0));
+                if self.curr_token_is(TokenType::Semi) {
+                    self.consume_token();
+                }
+                stmt
             }
             _ => Statement::Illegal,
         }
@@ -295,34 +289,34 @@ impl Parser {
     // BlockStatement: LCURL STATEMENT[] RCURL
     fn parse_block_statement(&mut self) -> BlockStatement {
         // LCURL
-        match self.expect(TokenType::LCurl) {
-            Ok(_) => {}
-            Err(e) => panic!("{e}"),
-        };
+        self.expect(TokenType::LCurl).unwrap();
 
-        // STATEMENT[]
         let mut block_statement = BlockStatement {
             statements: Vec::new(),
         };
 
-        while self.curr_token.token_type != TokenType::RCurl {
+        while !self.curr_token_is(TokenType::RCurl) {
             let statement = self.parse_statement();
 
-            if matches!(statement, Statement::Illegal) {
-                panic!("Block not closed")
+            if !matches!(statement, Statement::Illegal) {
+                block_statement.statements.push(statement);
+            } else {
+                self.consume_token();
             }
-            block_statement.statements.push(statement);
         }
 
         // RCURL
-        self.consume_token();
+        match self.expect(TokenType::RCurl) {
+            Ok(_) => {}
+            Err(e) => panic!("{e}"),
+        };
 
         block_statement
     }
 
     // ReturnStatement: RETURN EXPR
     fn parse_return_statement(&mut self) -> Statement {
-        self.consume_token(); // Consume return
+        self.expect(TokenType::Return).unwrap();
 
         let statement = Statement::Return(ReturnStatement {
             expression: self.parse_expression(0),
@@ -337,30 +331,22 @@ impl Parser {
     // IfStatement: IF LPAREN EXPR RPAREN BlockStatement ELSE BlockStatement
     fn parse_if_statement(&mut self) -> Statement {
         // IF
-        self.consume_token();
+        self.expect(TokenType::If).unwrap();
 
         // LPAREN
-        match self.expect(TokenType::LParen) {
-            Ok(_) => {}
-            Err(e) => panic!("{e}"),
-        };
+        self.expect(TokenType::LParen).unwrap();
 
         // EXPR
         let expression = self.parse_expression(0);
 
         // RPAREN
-        match self.expect(TokenType::RParen) {
-            Ok(_) => {}
-            Err(e) => panic!("{e}"),
-        };
+        self.expect(TokenType::RParen).unwrap();
 
         // BlockStatement
         let consequence = self.parse_block_statement();
 
         // ELSE?
-        let alternative = if self.curr_token_is(TokenType::Else) {
-            self.consume_token();
-
+        let alternative = if self.expect(TokenType::Assign).is_ok() {
             if self.curr_token_is(TokenType::If) {
                 // ELSE IF?
                 let nested_if = self.parse_if_statement();
@@ -388,18 +374,19 @@ impl Parser {
     // VarDeclStatement: TYPE IDENT ASSIGN EXPR
     fn parse_var_decl_statement(&mut self) -> Statement {
         // TYPE
-        let explicit_type = self.expect_type();
+        let explicit_type = self.consume_var_type();
 
         // IDENT
-        let identifier = self.expect_ident();
+        let identifier = self.consume_ident();
 
         // ASSIGN?
-        let expression = if self.curr_token_is(TokenType::Assign) {
-            self.consume_token();
+        let expression = if self.expect(TokenType::Assign).is_ok() {
             Some(self.parse_expression(0))
         } else {
             None
         };
+
+        self.expect(TokenType::Semi).unwrap();
 
         Statement::VarDecl(VarDeclStatement {
             explicit_type,
@@ -408,23 +395,17 @@ impl Parser {
         })
     }
 
-    // FuncDefStatement: FN IDENT LPAREN VARDECL[] RPAREN RARROW BLOCKSTATEMENT
+    // FuncDefStatement: FN IDENT LPAREN VARDECL[] RPAREN RARROW VARTYPE BLOCKSTATEMENT
     fn parse_function_def_statement(&mut self) -> Statement {
-        self.consume_token(); // Consume FN
+        self.expect(TokenType::Fn).unwrap();
 
-        let identifier = match self.expect(TokenType::Ident) {
-            Ok(identifier) => identifier.lexeme.clone(),
-            Err(e) => panic!("{e}"),
-        };
+        let identifier = self.consume_ident();
 
-        match self.expect(TokenType::LParen) {
-            Ok(_) => {}
-            Err(e) => panic!("{e}"),
-        };
+        self.expect(TokenType::LParen).unwrap();
 
         let mut args: Vec<VarDeclStatement> = Vec::new();
         while !self.curr_token_is(TokenType::RParen) {
-            let param = self.parse_param();
+            let param = self.parse_function_def_param();
             args.push(param);
 
             match self.expect(TokenType::Comma) {
@@ -433,17 +414,11 @@ impl Parser {
             };
         }
 
-        match self.expect(TokenType::RParen) {
-            Ok(_) => {}
-            Err(e) => panic!("{e}"),
-        };
+        self.expect(TokenType::RParen).unwrap();
 
-        match self.expect(TokenType::Rarrow) {
-            Ok(_) => {}
-            Err(e) => panic!("{e}"),
-        };
+        self.expect(TokenType::Rarrow).unwrap();
 
-        let return_type = self.expect_type();
+        let return_type = self.consume_var_type();
 
         let function_block = self.parse_block_statement();
 
