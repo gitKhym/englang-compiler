@@ -4,7 +4,7 @@ mod ast;
 mod lexer;
 mod parser;
 
-use lexer::Lexer;
+use lexer::{Lexer, TokenType};
 use parser::Parser;
 
 fn main() {
@@ -22,10 +22,18 @@ fn main() {
 
     let source_code = fs::read_to_string(file_path).expect("Unable to read file");
 
-    let lexer = Lexer::new(source_code);
+    let mut lexer = Lexer::new(source_code);
+
+    // loop {
+    //     let token = lexer.get_token().token_type;
+    //     if token == TokenType::Eof {
+    //         break;
+    //     }
+    //     println!(":{:?}", token);
+    // }
+
     let mut parser = Parser::new(lexer);
     let program = parser.parse_program();
 
     println!("{:#?}", program);
 }
-

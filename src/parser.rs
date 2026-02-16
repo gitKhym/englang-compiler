@@ -3,8 +3,8 @@ use std::mem::replace;
 
 use crate::{
     ast::{
-        ArrayLiteralExpr, AssignmentStatement, BinOpExpr, BlockStatement, ClassDefStatement, Expr,
-        FuncCallExpr, FuncDefExpr, FuncDefStatement, IfStatement, IndexExpr, MemberAccessExpr,
+        ArrayLiteralExpr, BinOpExpr, BlockStatement, ClassDefStatement, Expr, FuncCallExpr,
+        FuncDefExpr, FuncDefStatement, IfStatement, ImplDefStatement, IndexExpr, MemberAccessExpr,
         Program, RecordLiteralExpr, ReturnStatement, Statement, TypedIdent, UnOpExpr,
         VarDeclStatement,
     },
@@ -36,56 +36,48 @@ impl Parser {
         self.curr_token = replace(&mut self.next_token, self.lexer.get_token());
     }
 
-    pub fn curr_token_is(&mut self, token_type: TokenType) -> bool {
-        self.curr_token.token_type == token_type
+    pub fn clone_type(&mut self) -> TokenType {
+        self.curr_token.token_type.clone()
     }
 
-    pub fn next_token_is(&mut self, token_type: TokenType) -> bool {
-        self.next_token.token_type == token_type
+    pub fn clone_lexeme(&mut self) -> String {
+        self.curr_token.lexeme.clone()
     }
 
-    pub fn peek(&self, n: usize) -> Token {
-        match n {
-            0 => self.curr_token.clone(),
-            1 => self.next_token.clone(),
-            _ => {
-                let mut clone_lexer = self.lexer.clone();
-                let mut token = self.next_token.clone();
-                for _ in 2..=n {
-                    token = clone_lexer.get_token();
-                }
-                token
-            }
-        }
+    pub fn next_token_is(&mut self, token_type: &TokenType) -> bool {
+        &self.next_token.token_type == token_type
     }
-    pub fn expect(&mut self, token_type: TokenType) -> Result<Token, String> {
-        if self.curr_token.token_type == token_type {
-            let old_token = self.curr_token.clone();
-            self.consume_token();
-            Ok(old_token)
-        } else {
-            Err(format!(
+
+    pub fn curr_token_is(&mut self, token_type: &TokenType) -> bool {
+        &self.curr_token.token_type == token_type
+    }
+
+    pub fn expect(&mut self, token_type: TokenType) -> Result<(), String> {
+        if !self.curr_token_is(&token_type) {
+            return Err(format!(
                 "Expected {:?}, but found {:?}",
                 token_type, self.curr_token.token_type
-            ))
+            ));
         }
+
+        self.consume_token();
+        Ok(())
     }
 
     fn consume_var_type(&mut self) -> VarType {
-        let mut var_type = match self.curr_token.token_type.clone() {
+        let mut var_type = match self.clone_type() {
             TokenType::Type(var_type) => {
                 self.consume_token();
                 var_type
             }
             TokenType::CapIdent => {
-                let name = self.curr_token.lexeme.clone();
-                self.consume_token();
+                let name = self.get_string_from_token(&TokenType::CapIdent);
                 VarType::Custom(name)
             }
             _ => panic!(),
         };
 
-        while self.curr_token_is(TokenType::LSquare) {
+        while self.curr_token_is(&TokenType::LSquare) {
             self.consume_token();
             self.expect(TokenType::RSquare).unwrap();
             var_type = VarType::Array(Box::new(var_type));
@@ -94,36 +86,16 @@ impl Parser {
         var_type
     }
 
-    fn consume_cap_ident(&mut self) -> String {
-        if let TokenType::CapIdent = self.curr_token.token_type {
-            let lexeme = self.curr_token.lexeme.clone();
+    fn get_string_from_token(&mut self, token_type: &TokenType) -> String {
+        let lexeme = self.clone_lexeme();
+        if matches!(
+            token_type,
+            TokenType::Ident | TokenType::CapIdent | TokenType::StringLiteral
+        ) {
             self.consume_token();
             lexeme
         } else {
-            panic!(
-                "Classes require a capital letter at the start, got {:?} instead of {:?}",
-                self.curr_token.lexeme,
-                format!(
-                    "{}{}",
-                    self.curr_token
-                        .lexeme
-                        .chars()
-                        .next()
-                        .unwrap()
-                        .to_uppercase(),
-                    &self.curr_token.lexeme[1..]
-                )
-            );
-        }
-    }
-
-    fn consume_ident(&mut self) -> String {
-        if let TokenType::Ident = self.curr_token.token_type {
-            let lexeme = self.curr_token.lexeme.clone();
-            self.consume_token();
-            lexeme
-        } else {
-            panic!("Expected identifier, got {:?}", self.curr_token.token_type);
+            panic!("Unable to get string from token")
         }
     }
 
@@ -153,10 +125,11 @@ impl Parser {
             TokenType::Return => self.parse_return_statement(),
             TokenType::If => self.parse_if_statement(),
             TokenType::Class => self.parse_class_def_statement(),
+            TokenType::Impl => self.parse_impl_def_statement(),
             TokenType::Loop => self.parse_loop_statement(),
             TokenType::Fn => {
                 // FN IDENT => FunctionDefStatement
-                if self.next_token_is(TokenType::Ident) {
+                if self.next_token_is(&TokenType::Ident) {
                     self.parse_function_def_statement()
                 } else {
                     // FN => FunctionDefExpression
@@ -185,11 +158,11 @@ impl Parser {
             TokenType::Ident => match self.next_token.token_type {
                 TokenType::LParen => Box::new(self.parse_function_call_expression()),
                 TokenType::LSquare => Box::new(self.parse_indexing_expression()),
-                _ => Box::new(Expr::Ident(self.consume_ident())),
+                _ => Box::new(Expr::Ident(self.get_string_from_token(&TokenType::Ident))),
             },
 
             TokenType::CapIdent => {
-                let identifier = self.consume_cap_ident();
+                let identifier = self.get_string_from_token(&TokenType::CapIdent);
                 let fields = self.parse_records();
                 Box::new(Expr::RecordLiteral(RecordLiteralExpr {
                     identifier,
@@ -214,6 +187,10 @@ impl Parser {
                 Box::new(Expr::Bool(false))
             }
 
+            TokenType::StringLiteral => Box::new(Expr::StringLiteral(
+                self.get_string_from_token(&TokenType::StringLiteral),
+            )),
+
             TokenType::LParen => {
                 self.expect(TokenType::LParen).unwrap();
                 let expr = self.parse_expression(0);
@@ -225,9 +202,9 @@ impl Parser {
                 self.consume_token();
                 let mut elements = Vec::new();
 
-                if !self.curr_token_is(TokenType::RSquare) {
+                if !self.curr_token_is(&TokenType::RSquare) {
                     elements.push(self.parse_expression(0));
-                    while self.curr_token_is(TokenType::Comma) {
+                    while self.curr_token_is(&TokenType::Comma) {
                         self.consume_token();
                         elements.push(self.parse_expression(0));
                     }
@@ -238,7 +215,7 @@ impl Parser {
             }
 
             TokenType::Minus => {
-                let op = self.curr_token.token_type.clone();
+                let op = self.clone_type();
                 self.consume_token();
                 let (_, r_bp) = self.prefix_binding_power(&op);
                 let right = self.parse_expression(r_bp);
@@ -262,7 +239,7 @@ impl Parser {
                 | TokenType::Div
                 | TokenType::Eq
                 | TokenType::Neq => {
-                    let op = self.curr_token.token_type.clone();
+                    let op = self.clone_type();
                     let (l_bp, r_bp) = self.infix_binding_power(&op);
                     if l_bp < min_bp {
                         break;
@@ -280,7 +257,7 @@ impl Parser {
                     }
                     self.consume_token();
                     let member = match self.curr_token.token_type {
-                        TokenType::Ident => self.consume_ident(),
+                        TokenType::Ident => self.get_string_from_token(&TokenType::Ident),
                         _ => panic!("Expected identifier after '.'"),
                     };
                     left = Box::new(Expr::MemberAccess(MemberAccessExpr {
@@ -312,10 +289,10 @@ impl Parser {
 
                     let mut args: Vec<Box<Expr>> = Vec::new();
 
-                    if !self.curr_token_is(TokenType::RParen) {
+                    if !self.curr_token_is(&TokenType::RParen) {
                         args.push(self.parse_expression(0));
 
-                        while self.curr_token_is(TokenType::Comma) {
+                        while self.curr_token_is(&TokenType::Comma) {
                             self.expect(TokenType::Comma).unwrap();
                             args.push(self.parse_expression(0));
                         }
@@ -375,8 +352,8 @@ impl Parser {
 
         let mut fields: Vec<(String, Box<Expr>)> = Vec::new();
 
-        while !self.curr_token_is(TokenType::RCurl) {
-            let ident = self.consume_ident();
+        while !self.curr_token_is(&TokenType::RCurl) {
+            let ident = self.get_string_from_token(&TokenType::Ident);
 
             self.expect(TokenType::Colon).unwrap();
 
@@ -384,7 +361,7 @@ impl Parser {
 
             fields.push((ident, value));
 
-            if self.curr_token_is(TokenType::Comma) {
+            if self.curr_token_is(&TokenType::Comma) {
                 self.consume_token();
             } else {
                 break;
@@ -399,7 +376,7 @@ impl Parser {
     // (VARTYPE IDENT)[]
     fn parse_typed_ident_list(&mut self) -> TypedIdent {
         let explicit_type = self.consume_var_type();
-        let identifier = self.consume_ident();
+        let identifier = self.get_string_from_token(&TokenType::Ident);
 
         TypedIdent {
             explicit_type,
@@ -416,7 +393,7 @@ impl Parser {
         self.expect(TokenType::LParen).unwrap();
 
         let mut args: Vec<TypedIdent> = Vec::new();
-        while !self.curr_token_is(TokenType::RParen) {
+        while !self.curr_token_is(&TokenType::RParen) {
             let param = self.parse_typed_ident_list();
             args.push(param);
 
@@ -445,21 +422,19 @@ impl Parser {
         })
     }
     fn parse_function_call_expression(&mut self) -> Expr {
-        let identifier_lexeme = self.consume_ident(); // Consume IDENT
-        let callee = Box::new(Expr::Ident(identifier_lexeme));
+        let callee = Box::new(Expr::Ident(self.get_string_from_token(&TokenType::Ident)));
 
         self.expect(TokenType::LParen).unwrap(); // Consume LPAREN
 
         let mut args: Vec<Box<Expr>> = Vec::new();
-
-        if self.curr_token_is(TokenType::RParen) {
+        if self.curr_token_is(&TokenType::RParen) {
             self.consume_token(); // consume RParen
             return Expr::FuncCall(FuncCallExpr { callee, args });
         }
 
         args.push(self.parse_expression(0));
 
-        while self.curr_token_is(TokenType::Comma) {
+        while self.curr_token_is(&TokenType::Comma) {
             self.expect(TokenType::Comma).unwrap(); // consume comma
             args.push(self.parse_expression(0));
         }
@@ -470,8 +445,7 @@ impl Parser {
     }
 
     fn parse_indexing_expression(&mut self) -> Expr {
-        let identifier_lexeme = self.consume_ident(); // Consumes the IDENT
-        let object_expr = Box::new(Expr::Ident(identifier_lexeme));
+        let object_expr = Box::new(Expr::Ident(self.get_string_from_token(&TokenType::Ident)));
 
         self.expect(TokenType::LSquare).unwrap();
         let index = self.parse_expression(0);
@@ -492,7 +466,7 @@ impl Parser {
             statements: Vec::new(),
         };
 
-        while !self.curr_token_is(TokenType::RCurl) {
+        while !self.curr_token_is(&TokenType::RCurl) {
             let statement = self.parse_statement();
 
             if !matches!(statement, Statement::Illegal) {
@@ -544,7 +518,7 @@ impl Parser {
 
         // ELSE?
         let alternative = if self.expect(TokenType::Else).is_ok() {
-            if self.curr_token_is(TokenType::If) {
+            if self.curr_token_is(&TokenType::If) {
                 // ELSE IF?
                 let nested_if = self.parse_if_statement();
 
@@ -574,7 +548,7 @@ impl Parser {
         let explicit_type = self.consume_var_type();
 
         // IDENT
-        let identifier = self.consume_ident();
+        let identifier = self.get_string_from_token(&TokenType::Ident);
 
         // ASSIGN?
         let expression = if self.expect(TokenType::Assign).is_ok() {
@@ -596,12 +570,12 @@ impl Parser {
     fn parse_class_def_statement(&mut self) -> Statement {
         self.expect(TokenType::Class).unwrap();
 
-        let identifier = self.consume_cap_ident();
+        let identifier = self.get_string_from_token(&TokenType::Ident);
 
         self.expect(TokenType::LCurl).unwrap();
 
         let mut fields: Vec<TypedIdent> = Vec::new();
-        while !self.curr_token_is(TokenType::RCurl) {
+        while !self.curr_token_is(&TokenType::RCurl) {
             let field = self.parse_typed_ident_list();
             fields.push(field);
 
@@ -616,16 +590,43 @@ impl Parser {
         Statement::ClassDef(ClassDefStatement { identifier, fields })
     }
 
+    fn parse_impl_def_statement(&mut self) -> Statement {
+        self.expect(TokenType::Impl).unwrap();
+        let identifier = self.get_string_from_token(&TokenType::CapIdent);
+        self.expect(TokenType::LCurl).unwrap();
+
+        let mut implementations: Vec<FuncDefStatement> = Vec::new();
+        while !self.curr_token_is(&TokenType::RCurl) {
+            println!("Will parse statement in next line");
+            let stmt = self.parse_function_def_statement();
+            println!("Next token is {:#?}", self.next_token);
+            match stmt {
+                Statement::FuncDef(func_def) => implementations.push(func_def),
+                _ => panic!(
+                    "Expected a function definition inside impl block, got {:?}",
+                    stmt
+                ),
+            }
+        }
+
+        self.expect(TokenType::RCurl).unwrap();
+
+        Statement::ImplDef(ImplDefStatement {
+            identifier,
+            implementations,
+        })
+    }
+
     // FuncDefStatement: FN IDENT LPAREN TYPEDIDENT[] RPAREN RARROW VARTYPE BLOCKSTATEMENT
     fn parse_function_def_statement(&mut self) -> Statement {
         self.expect(TokenType::Fn).unwrap();
 
-        let identifier = self.consume_ident();
+        let identifier = self.get_string_from_token(&TokenType::Ident);
 
         self.expect(TokenType::LParen).unwrap();
 
         let mut args: Vec<TypedIdent> = Vec::new();
-        while !self.curr_token_is(TokenType::RParen) {
+        while !self.curr_token_is(&TokenType::RParen) {
             let param = self.parse_typed_ident_list();
             args.push(param);
 

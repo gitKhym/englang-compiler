@@ -1,5 +1,5 @@
 use std::char;
-#[derive(Clone)]
+#[derive(Debug)]
 pub struct Lexer {
     input: String,
     pos: usize,
@@ -9,8 +9,11 @@ pub struct Lexer {
     col: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash, Default)]
 pub enum TokenType {
+    #[default]
+    Default,
+
     Illegal,
     Eof,
     Ident,
@@ -73,7 +76,7 @@ pub enum VarType {
     Custom(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
@@ -397,13 +400,7 @@ impl Lexer {
 
                 let span = (self.peek_pos - initial_pos) as u32; // Calculate span before consuming the closing quote
                 self.read_char(); // consume closing quote
-                return Token::new(
-                    TokenType::StringLiteral,
-                    value,
-                    start_row,
-                    start_col,
-                    span,
-                );
+                return Token::new(TokenType::StringLiteral, value, start_row, start_col, span);
             }
             '\'' => Token::new(
                 TokenType::SingleQt,

@@ -9,6 +9,7 @@ pub struct Program {
 #[derive(Debug)]
 pub enum Expr {
     Null,
+    StringLiteral(String),
     Int(i64),
     Ident(String),
     Bool(bool),
@@ -31,6 +32,7 @@ pub enum Statement {
     If(IfStatement),
     FuncDef(FuncDefStatement),
     ClassDef(ClassDefStatement),
+    ImplDef(ImplDefStatement),
     Assignment(AssignmentStatement),
 }
 
@@ -151,4 +153,10 @@ pub struct FuncDefStatement {
 pub struct ClassDefStatement {
     pub identifier: String,
     pub fields: Vec<TypedIdent>,
+}
+
+#[derive(Debug)]
+pub struct ImplDefStatement {
+    pub identifier: String,
+    pub implementations: Vec<FuncDefStatement>,
 }

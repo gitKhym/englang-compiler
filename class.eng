@@ -1,6 +1,5 @@
-class Person {
-  string name
-}
-fn construct(string name, int age, bool is_alive) -> Self {
-  return Person {name: x + 2};
+impl Person {
+  fn construct(string name, int age, bool is_alive) -> Self {
+    return Person { name: "George"};
+  }
 }
