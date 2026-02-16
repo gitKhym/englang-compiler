@@ -41,6 +41,12 @@ pub enum TokenType {
     Digit,
 
     // Keywords
+    Class,
+    Impl,
+    SelfType,
+    Loop,
+    With,
+    While,
     Null,
     True,
     False,
@@ -112,9 +118,52 @@ impl Lexer {
         }
     }
 
-    pub fn skip_whitespace(&mut self) {
-        while matches!(self.char, ' ' | '\t' | '\n' | '\r') {
+    fn skip_line_comment(&mut self) {
+        while self.char != '\0' && self.char != '\n' {
             self.read_char();
+        }
+        if self.char == '\n' {
+            self.read_char();
+        }
+    }
+
+    fn skip_block_comment(&mut self) {
+        self.read_char(); // consume the first * after /
+        loop {
+            if self.char == '\0' {
+                break;
+            } else if self.char == '*' && self.peek_char() == '/' {
+                self.read_char(); // consume *
+                self.read_char(); // consume /
+                self.read_char(); // move to next char after comment
+                break;
+            } else {
+                self.read_char();
+            }
+        }
+    }
+
+    pub fn skip_whitespace(&mut self) {
+        loop {
+            match self.char {
+                ' ' | '\t' | '\n' | '\r' => self.read_char(),
+                '/' => {
+                    match self.peek_char() {
+                        '/' => {
+                            self.read_char(); // consume first /
+                            self.read_char(); // consume second /
+                            self.skip_line_comment();
+                        }
+                        '*' => {
+                            self.read_char(); // consume first /
+                            self.read_char(); // consume *
+                            self.skip_block_comment();
+                        }
+                        _ => break,
+                    }
+                }
+                _ => break,
+            }
         }
     }
 
@@ -152,6 +201,12 @@ impl Lexer {
 
     pub fn determine_token_type(&mut self, input: &str) -> TokenType {
         match input {
+            "loop" => TokenType::Loop,
+            "with" => TokenType::With,
+            "while" => TokenType::While,
+            "class" => TokenType::Class,
+            "impl" => TokenType::Impl,
+            "Self" => TokenType::SelfType,
             "True" => TokenType::True,
             "False" => TokenType::False,
             "fn" => TokenType::Fn,

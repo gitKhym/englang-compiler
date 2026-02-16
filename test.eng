@@ -8,3 +8,44 @@ fn main() -> void {
 
   print(add(x,y));
 }
+//
+//   Person person1 = Person::construct("John", 35, True);
+//   person1.greet();
+//   print(person1.pets[0]);
+//
+//
+//   int[] nums = [5, 5, 5];
+//   loop len(nums) with i {
+//     print(nums[i]);
+//   }
+//
+//   loop nums with n {
+//     print(n)
+//   }
+// }
+//
+// class Person {
+//   string name,
+//   int age,
+//   bool is_alive,
+//   Pet[] pets,
+// }
+//
+// class Pet {
+//   string name,
+//   int age,
+// }
+//
+// impl Person {
+//   fn construct(string name, int age, bool is_alive) -> Self {
+//     return Person {
+//       name: name,
+//       age: age,
+//       is_alive: is_alive,
+//     }
+//   }
+//
+//   fn greet() -> void {
+//     print("Hello, " + name);
+//   }
+// }
