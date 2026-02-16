@@ -7,7 +7,7 @@ pub struct Lexer {
     char: char,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TokenType {
     Illegal,
     Eof,
@@ -57,14 +57,15 @@ pub enum TokenType {
     Type(VarType),
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VarType {
     Void,
     String,
     Int,
     Float,
     Bool,
-    Any,
+    Array(Box<VarType>),
+    Custom(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -293,3 +294,4 @@ impl Lexer {
         token
     }
 }
+

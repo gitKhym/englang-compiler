@@ -3,7 +3,6 @@ use std::{env, fs, path::Path};
 mod ast;
 mod lexer;
 mod parser;
-mod ast_visualizer;
 
 use lexer::Lexer;
 use parser::Parser;
@@ -27,6 +26,6 @@ fn main() {
     let mut parser = Parser::new(lexer);
     let program = parser.parse_program();
 
-    ast_visualizer::generate_dot_graph(&program, "ast.dot").expect("Failed to generate AST graph");
-    println!("AST graph generated in ast.dot");
+    println!("{:#?}", program);
 }
+

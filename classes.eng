@@ -1,7 +1,6 @@
 person1.greet();
 print(person1.pets[0]);
 
-
 int[] nums = [5, 5, 5];
 
 loop len(nums) with i {
@@ -27,7 +26,7 @@ class Pet {
 impl Person {
   fn construct(string name, int age, bool is_alive) -> Self {
     return Person {
-name: name,
+        name: name,
         age: age,
         is_alive: is_alive,
     }

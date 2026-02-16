@@ -3,8 +3,9 @@ use std::mem::replace;
 
 use crate::{
     ast::{
-        BinOpExpr, BlockStatement, Expr, FuncCallExpr, FuncDefExpr, FuncDefStatement, IfStatement,
-        Program, ReturnStatement, Statement, UnOpExpr, VarDeclStatement,
+        ArrayLiteralExpr, AssignmentStatement, BinOpExpr, BlockStatement, ClassDefStatement, Expr,
+        FuncCallExpr, FuncDefExpr, FuncDefStatement, IfStatement, IndexExpr, MemberAccessExpr,
+        Program, ReturnStatement, Statement, TypedIdent, UnOpExpr, VarDeclStatement,
     },
     lexer::{Lexer, Token, TokenType, VarType},
 };
@@ -56,12 +57,26 @@ impl Parser {
     }
 
     fn consume_var_type(&mut self) -> VarType {
-        if let TokenType::Type(var_type) = self.curr_token.token_type {
+        let mut var_type = match self.curr_token.token_type.clone() {
+            TokenType::Type(var_type) => {
+                self.consume_token();
+                var_type
+            }
+            TokenType::Ident => {
+                let name = self.curr_token.lexeme.clone();
+                self.consume_token();
+                VarType::Custom(name)
+            }
+            _ => panic!(),
+        };
+
+        while self.curr_token_is(TokenType::LSquare) {
             self.consume_token();
-            var_type
-        } else {
-            panic!("Expected type, got {:?}", self.curr_token.token_type);
+            self.expect(TokenType::RSquare).unwrap();
+            var_type = VarType::Array(Box::new(var_type));
         }
+
+        var_type
     }
 
     fn consume_ident(&mut self) -> String {
@@ -92,25 +107,41 @@ impl Parser {
         program
     }
 
-    fn prefix_binding_power(&self, op: &TokenType) -> ((), u8) {
-        match op {
-            TokenType::Plus | TokenType::Minus => ((), 8),
-            _ => panic!("bad prefix operator"),
-        }
-    }
+    // STATEMENTS
+    fn parse_statement(&mut self) -> Statement {
+        match self.curr_token.token_type {
+            TokenType::Type(_) => self.parse_var_decl_statement(),
+            TokenType::Return => self.parse_return_statement(),
+            TokenType::If => self.parse_if_statement(),
+            TokenType::Class => self.parse_class_def_statement(),
+            TokenType::Loop => self.parse_loop_statement(),
+            TokenType::Fn => {
+                // FN IDENT => FunctionDefStatement
+                if self.next_token_is(TokenType::Ident) {
+                    self.parse_function_def_statement()
+                } else {
+                    // FN => FunctionDefExpression
+                    let expr = self.parse_expression(0);
+                    Statement::Expression(expr)
+                }
+            }
+            TokenType::Ident => {
+                if self.next_token_is(TokenType::Ident) {
+                    return self.parse_var_decl_statement();
+                }
 
-    fn infix_binding_power(&mut self, op: &TokenType) -> (u8, u8) {
-        match op {
-            TokenType::Eq | TokenType::Neq => (0, 1),
-            TokenType::Plus | TokenType::Minus => (1, 2),
-            TokenType::Mult | TokenType::Div => (3, 4),
-            _ => panic!("bad op: {:?}", op),
+                Statement::Expression(self.parse_expression(0))
+            }
+
+            _ => Statement::Expression(self.parse_expression(0)),
         }
     }
 
     fn parse_expression(&mut self, min_bp: u8) -> Box<Expr> {
+        // Parse the prefix
         let mut left: Box<Expr> = match &self.curr_token.token_type {
             TokenType::Fn => Box::new(self.parse_function_def_expression()),
+
             TokenType::Ident => {
                 if self.next_token_is(TokenType::LParen) {
                     Box::new(self.parse_function_call_expression())
@@ -118,7 +149,6 @@ impl Parser {
                     Box::new(Expr::Ident(self.consume_ident()))
                 }
             }
-
             TokenType::Digit => Box::new(self.parse_int_expression()),
 
             TokenType::Null => {
@@ -138,51 +168,119 @@ impl Parser {
 
             TokenType::LParen => {
                 self.expect(TokenType::LParen).unwrap();
-
                 let expr = self.parse_expression(0);
-
-                assert_eq!(self.curr_token.token_type, TokenType::RParen);
                 self.expect(TokenType::RParen).unwrap();
-
                 expr
             }
 
-            TokenType::Minus => {
-                let op = self.curr_token.token_type;
+            TokenType::LSquare => {
                 self.consume_token();
+                let mut elements = Vec::new();
 
-                let ((), r_bp) = self.prefix_binding_power(&op);
+                if !self.curr_token_is(TokenType::RSquare) {
+                    elements.push(self.parse_expression(0));
+                    while self.curr_token_is(TokenType::Comma) {
+                        self.consume_token();
+                        elements.push(self.parse_expression(0));
+                    }
+                }
+
+                self.expect(TokenType::RSquare).unwrap();
+                Box::new(Expr::ArrayLiteral(ArrayLiteralExpr { elements }))
+            }
+
+            TokenType::Minus => {
+                let op = self.curr_token.token_type.clone();
+                self.consume_token();
+                let (_, r_bp) = self.prefix_binding_power(&op);
                 let right = self.parse_expression(r_bp);
-
                 Box::new(Expr::UnOp(UnOpExpr { op, expr: right }))
             }
 
-            token => panic!("bad token: {:?}", token),
+            token => panic!("Attempted to parse expression, got: {:?}", token),
         };
 
+        // Parse postfix / infix operators
         loop {
-            let op = match &self.curr_token.token_type {
+            match self.curr_token.token_type {
                 TokenType::Eof | TokenType::Semi | TokenType::RParen => break,
+
+                // Binary / infix operators
                 TokenType::Plus
                 | TokenType::Minus
-                | TokenType::Div
                 | TokenType::Mult
+                | TokenType::Div
                 | TokenType::Eq
-                | TokenType::Neq => self.curr_token.token_type,
+                | TokenType::Neq => {
+                    let op = self.curr_token.token_type.clone();
+                    let (l_bp, r_bp) = self.infix_binding_power(&op);
+                    if l_bp < min_bp {
+                        break;
+                    }
+                    self.consume_token();
+                    let right = self.parse_expression(r_bp);
+                    left = Box::new(Expr::BinOp(BinOpExpr { op, left, right }));
+                }
+
+                // Postfix operators
+                TokenType::Dot => {
+                    self.consume_token();
+                    let member = match self.curr_token.token_type {
+                        TokenType::Ident => self.consume_ident(),
+                        _ => panic!("Expected identifier after '.'"),
+                    };
+                    left = Box::new(Expr::MemberAccess(MemberAccessExpr {
+                        object: left,
+                        field: member,
+                    }));
+                }
+
+                TokenType::LSquare => {
+                    self.consume_token(); // consume '['
+                    let mut elements = Vec::new();
+
+                    if !self.curr_token_is(TokenType::RSquare) {
+                        elements.push(self.parse_expression(0));
+                        while self.curr_token_is(TokenType::Comma) {
+                            self.consume_token();
+                            elements.push(self.parse_expression(0));
+                        }
+                    }
+
+                    self.expect(TokenType::RSquare).unwrap();
+                    left = Box::new(Expr::ArrayLiteral(ArrayLiteralExpr { elements }))
+                }
+
+                TokenType::Bang => {
+                    self.consume_token();
+                    left = Box::new(Expr::UnOp(UnOpExpr {
+                        op: TokenType::Bang,
+                        expr: left,
+                    }));
+                }
+
                 _ => break,
-            };
-
-            let (l_bp, r_bp) = self.infix_binding_power(&op);
-            if l_bp < min_bp {
-                break;
             }
-
-            self.consume_token();
-            let right = self.parse_expression(r_bp);
-
-            left = Box::new(Expr::BinOp(BinOpExpr { op, left, right }))
         }
+
         left
+    }
+
+    fn prefix_binding_power(&self, op: &TokenType) -> ((), u8) {
+        match op {
+            TokenType::Plus | TokenType::Minus => ((), 8),
+            _ => panic!("bad prefix operator"),
+        }
+    }
+
+    fn infix_binding_power(&mut self, op: &TokenType) -> (u8, u8) {
+        match op {
+            TokenType::Eq | TokenType::Neq => (0, 1),
+            TokenType::Plus | TokenType::Minus => (1, 2),
+            TokenType::Mult | TokenType::Div => (3, 4),
+            TokenType::Dot => (9, 10),
+            _ => panic!("bad op: {:?}", op),
+        }
     }
 
     fn parse_int_expression(&mut self) -> Expr {
@@ -193,15 +291,14 @@ impl Parser {
         Expr::Int(int)
     }
 
-    // VarDeclStatement(Params): VARTYPE IDENT
-    fn parse_function_def_param(&mut self) -> VarDeclStatement {
+    // (VARTYPE IDENT)[]
+    fn parse_typed_ident_list(&mut self) -> TypedIdent {
         let explicit_type = self.consume_var_type();
         let identifier = self.consume_ident();
 
-        VarDeclStatement {
+        TypedIdent {
             explicit_type,
             identifier,
-            expression: None,
         }
     }
 
@@ -213,15 +310,16 @@ impl Parser {
         // LPAREN
         self.expect(TokenType::LParen).unwrap();
 
-        let mut args: Vec<VarDeclStatement> = Vec::new();
-        if !self.curr_token_is(TokenType::RParen) {
-            args.push(self.parse_function_def_param());
-            while self.curr_token_is(TokenType::Comma) {
-                self.consume_token();
-                args.push(self.parse_function_def_param());
-            }
-        }
+        let mut args: Vec<TypedIdent> = Vec::new();
+        while !self.curr_token_is(TokenType::RParen) {
+            let param = self.parse_typed_ident_list();
+            args.push(param);
 
+            match self.expect(TokenType::Comma) {
+                Ok(_) => continue,
+                Err(_) => break,
+            };
+        }
         // RPAREN
         self.expect(TokenType::RParen).unwrap();
 
@@ -265,33 +363,6 @@ impl Parser {
         Expr::FuncCall(FuncCallExpr { identifier, args })
     }
 
-    // STATEMENTS
-    fn parse_statement(&mut self) -> Statement {
-        match self.curr_token.token_type {
-            TokenType::Type(_) => self.parse_var_decl_statement(),
-            TokenType::Return => self.parse_return_statement(),
-            TokenType::If => self.parse_if_statement(),
-            TokenType::Fn => {
-                // FN IDENT => FunctionDefStatement
-                if self.next_token_is(TokenType::Ident) {
-                    self.parse_function_def_statement()
-                } else {
-                    // FN => FunctionDefExpression
-                    let expr = self.parse_expression(0);
-                    Statement::Expression(expr)
-                }
-            }
-            TokenType::Ident => {
-                let stmt = Statement::Expression(self.parse_expression(0));
-                if self.curr_token_is(TokenType::Semi) {
-                    self.consume_token();
-                }
-                stmt
-            }
-            _ => panic!("Unexpected Token"),
-        }
-    }
-
     // BlockStatement: LCURL STATEMENT[] RCURL
     fn parse_block_statement(&mut self) -> BlockStatement {
         // LCURL
@@ -320,7 +391,7 @@ impl Parser {
         block_statement
     }
 
-    // ReturnStatement: RETURN EXPR
+    // ReturnStatement: RETURN EXPRSTATEMENT
     fn parse_return_statement(&mut self) -> Statement {
         self.expect(TokenType::Return).unwrap();
 
@@ -352,7 +423,7 @@ impl Parser {
         let consequence = self.parse_block_statement();
 
         // ELSE?
-        let alternative = if self.expect(TokenType::Assign).is_ok() {
+        let alternative = if self.expect(TokenType::Else).is_ok() {
             if self.curr_token_is(TokenType::If) {
                 // ELSE IF?
                 let nested_if = self.parse_if_statement();
@@ -401,7 +472,31 @@ impl Parser {
         })
     }
 
-    // FuncDefStatement: FN IDENT LPAREN VARDECL[] RPAREN RARROW VARTYPE BLOCKSTATEMENT
+    // ClassDefStatement: CLASS IDENT LCURL TYPEDIDENT[] RCURL
+    fn parse_class_def_statement(&mut self) -> Statement {
+        self.expect(TokenType::Class).unwrap();
+
+        let identifier = self.consume_ident();
+
+        self.expect(TokenType::LCurl).unwrap();
+
+        let mut fields: Vec<TypedIdent> = Vec::new();
+        while !self.curr_token_is(TokenType::RCurl) {
+            let field = self.parse_typed_ident_list();
+            fields.push(field);
+
+            match self.expect(TokenType::Comma) {
+                Ok(_) => continue,
+                Err(_) => break,
+            };
+        }
+
+        self.expect(TokenType::RCurl).unwrap();
+
+        Statement::ClassDef(ClassDefStatement { identifier, fields })
+    }
+
+    // FuncDefStatement: FN IDENT LPAREN TYPEDIDENT[] RPAREN RARROW VARTYPE BLOCKSTATEMENT
     fn parse_function_def_statement(&mut self) -> Statement {
         self.expect(TokenType::Fn).unwrap();
 
@@ -409,9 +504,9 @@ impl Parser {
 
         self.expect(TokenType::LParen).unwrap();
 
-        let mut args: Vec<VarDeclStatement> = Vec::new();
+        let mut args: Vec<TypedIdent> = Vec::new();
         while !self.curr_token_is(TokenType::RParen) {
-            let param = self.parse_function_def_param();
+            let param = self.parse_typed_ident_list();
             args.push(param);
 
             match self.expect(TokenType::Comma) {
@@ -434,5 +529,11 @@ impl Parser {
             return_type,
             function_block,
         })
+    }
+
+    fn parse_loop_statement(&mut self) -> Statement {
+        self.expect(TokenType::Loop).unwrap();
+
+        Statement::Illegal
     }
 }
