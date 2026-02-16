@@ -1,21 +1,6 @@
 class Person {
-  string fname,
-  string lname,
+  string name
 }
-
-int[] nums = [1, 2, 3];
-
-Person[] group;
-
-int first_num = nums[0];
-int second_num = nums[0];
-
-print(nums[0]);
-
-if (nums[1] == 2) {
-  nums[0] = 2;
-}
-
-fn get_element(int index, int[] nums) {
-  return nums[index];
+fn construct(string name, int age, bool is_alive) -> Self {
+  return Person {name: x + 2};
 }

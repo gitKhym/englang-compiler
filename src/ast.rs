@@ -19,6 +19,7 @@ pub enum Expr {
     MemberAccess(MemberAccessExpr),
     Index(IndexExpr),
     ArrayLiteral(ArrayLiteralExpr),
+    RecordLiteral(RecordLiteralExpr),
 }
 
 #[derive(Debug)]
@@ -38,6 +39,12 @@ pub enum Statement {
 pub struct MemberAccessExpr {
     pub object: Box<Expr>,
     pub field: String,
+}
+
+#[derive(Debug)]
+pub struct RecordLiteralExpr {
+    pub identifier: String,
+    pub fields: Vec<(String, Box<Expr>)>,
 }
 
 // Binary operation expression
@@ -66,7 +73,7 @@ pub struct FuncDefExpr {
 // Function call expression
 #[derive(Debug)]
 pub struct FuncCallExpr {
-    pub identifier: String,
+    pub callee: Box<Expr>,
     pub args: Vec<Box<Expr>>,
 }
 
@@ -145,4 +152,3 @@ pub struct ClassDefStatement {
     pub identifier: String,
     pub fields: Vec<TypedIdent>,
 }
-

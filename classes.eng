@@ -1,4 +1,3 @@
-person1.greet();
 print(person1.pets[0]);
 
 int[] nums = [5, 5, 5];
@@ -20,7 +19,7 @@ class Person {
 
 class Pet {
   string name,
-         int age,
+  int age,
 }
 
 impl Person {

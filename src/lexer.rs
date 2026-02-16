@@ -1,10 +1,12 @@
 use std::char;
-
+#[derive(Clone)]
 pub struct Lexer {
     input: String,
     pos: usize,
     peek_pos: usize,
     char: char,
+    row: u32,
+    col: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -12,6 +14,9 @@ pub enum TokenType {
     Illegal,
     Eof,
     Ident,
+    CapIdent,
+    UpperIdent,
+    StringLiteral,
 
     // Symbols
     LCurl,
@@ -72,11 +77,20 @@ pub enum VarType {
 pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
+    pub row: u32,
+    pub col: u32,
+    pub span: u32,
 }
 
 impl Token {
-    pub fn new(token_type: TokenType, lexeme: String) -> Self {
-        Self { token_type, lexeme }
+    pub fn new(token_type: TokenType, lexeme: String, row: u32, col: u32, span: u32) -> Self {
+        Self {
+            token_type,
+            lexeme,
+            row,
+            col,
+            span,
+        }
     }
 }
 
@@ -86,7 +100,9 @@ impl Lexer {
             input,
             pos: 0,
             peek_pos: 0,
-            char: 'a',
+            char: '\0',
+            row: 1,
+            col: 0,
         };
         lexer.read_char();
         lexer
@@ -97,17 +113,19 @@ impl Lexer {
             self.char = '\0';
             self.pos = self.peek_pos;
             return;
-        } else {
-            self.char = self
-                .input
-                .chars()
-                .nth(self.peek_pos)
-                .expect("Index out of range")
         }
+
+        self.char = self.input.chars().nth(self.peek_pos).unwrap();
         self.pos = self.peek_pos;
         self.peek_pos += 1;
-    }
 
+        if self.char == '\n' {
+            self.row += 1;
+            self.col = 0;
+        } else {
+            self.col += 1;
+        }
+    }
     pub fn peek_char(&mut self) -> char {
         if self.peek_pos >= self.input.len() {
             '\0'
@@ -172,6 +190,10 @@ impl Lexer {
         matches!(self.char, 'a'..='z' | 'A'..='Z' | '_')
     }
 
+    pub fn is_alphanumeric_char(&mut self) -> bool {
+        matches!(self.char, 'a'..='z' | 'A'..='Z' | '_' | '0'..='9')
+    }
+
     pub fn is_digit(&mut self) -> bool {
         matches!(self.char, '0'..='9')
     }
@@ -189,7 +211,7 @@ impl Lexer {
     pub fn read_identifier(&mut self) -> String {
         let pos = self.pos;
 
-        while self.is_letter() {
+        while self.is_alphanumeric_char() {
             self.read_char();
         }
 
@@ -228,64 +250,222 @@ impl Lexer {
         self.skip_whitespace();
 
         let token = match self.char {
-            '{' => Token::new(TokenType::LCurl, self.char.to_string()),
-            '}' => Token::new(TokenType::RCurl, self.char.to_string()),
-            '(' => Token::new(TokenType::LParen, self.char.to_string()),
-            ')' => Token::new(TokenType::RParen, self.char.to_string()),
-            '[' => Token::new(TokenType::LSquare, self.char.to_string()),
-            ']' => Token::new(TokenType::RSquare, self.char.to_string()),
+            '{' => Token::new(
+                TokenType::LCurl,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
+            '}' => Token::new(
+                TokenType::RCurl,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
+            '(' => Token::new(
+                TokenType::LParen,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
+            ')' => Token::new(
+                TokenType::RParen,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
+            '[' => Token::new(
+                TokenType::LSquare,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
+            ']' => Token::new(
+                TokenType::RSquare,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
             '=' => {
                 if self.peek_char() == '=' {
-                    let first = self.char;
-                    self.read_char();
-                    let second = self.char;
-                    Token::new(TokenType::Eq, format!("{}{}", first, second))
+                    let start_col = self.col;
+                    let current_char = self.char;
+                    let peeked_char = self.peek_char();
+                    let lexeme = format!("{}{}", current_char, peeked_char);
+                    self.read_char(); // first =
+                    self.read_char(); // second =
+                    let span = lexeme.len() as u32;
+
+                    Token {
+                        token_type: TokenType::Eq,
+                        lexeme,
+                        row: self.row,
+                        col: start_col,
+                        span,
+                    }
                 } else {
-                    Token::new(TokenType::Assign, self.char.to_string())
+                    Token::new(
+                        TokenType::Assign,
+                        self.char.to_string(),
+                        self.row,
+                        self.col,
+                        1,
+                    )
                 }
             }
             '!' => {
                 if self.peek_char() == '=' {
+                    let start_col = self.col;
                     let first = self.char;
                     self.read_char();
                     let second = self.char;
-                    Token::new(TokenType::Neq, format!("{}{}", first, second))
+                    let lexeme = format!("{}{}", first, second);
+                    let span = lexeme.len() as u32;
+                    Token::new(TokenType::Neq, lexeme, self.row, start_col, span)
                 } else {
-                    Token::new(TokenType::Bang, self.char.to_string())
+                    Token::new(
+                        TokenType::Bang,
+                        self.char.to_string(),
+                        self.row,
+                        self.col,
+                        1,
+                    )
                 }
             }
-            '+' => Token::new(TokenType::Plus, self.char.to_string()),
+            '+' => Token::new(
+                TokenType::Plus,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
             '-' => {
                 if self.peek_char() == '>' {
+                    let start_col = self.col;
                     let first = self.char;
                     self.read_char();
                     let second = self.char;
-                    Token::new(TokenType::Rarrow, format!("{}{}", first, second))
+                    let lexeme = format!("{}{}", first, second);
+                    let span = lexeme.len() as u32;
+                    Token::new(TokenType::Rarrow, lexeme, self.row, start_col, span)
                 } else {
-                    Token::new(TokenType::Minus, self.char.to_string())
+                    Token::new(
+                        TokenType::Minus,
+                        self.char.to_string(),
+                        self.row,
+                        self.col,
+                        1,
+                    )
                 }
             }
-            '/' => Token::new(TokenType::Div, self.char.to_string()),
-            '*' => Token::new(TokenType::Mult, self.char.to_string()),
-            '"' => Token::new(TokenType::DoubleQt, self.char.to_string()),
-            '\'' => Token::new(TokenType::SingleQt, self.char.to_string()),
-            '<' => Token::new(TokenType::Lt, self.char.to_string()),
-            '>' => Token::new(TokenType::Gt, self.char.to_string()),
-            ':' => Token::new(TokenType::Colon, self.char.to_string()),
-            ';' => Token::new(TokenType::Semi, self.char.to_string()),
-            ',' => Token::new(TokenType::Comma, self.char.to_string()),
-            '.' => Token::new(TokenType::Dot, self.char.to_string()),
-            '\0' => Token::new(TokenType::Eof, "".to_string()),
+            '/' => Token::new(TokenType::Div, self.char.to_string(), self.row, self.col, 1),
+            '*' => Token::new(
+                TokenType::Mult,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
+            '"' => {
+                let start_row = self.row;
+                let start_col = self.col;
+                let initial_pos = self.pos;
+                self.read_char(); // Consume the opening quote
+
+                let mut value = String::new();
+                while self.char != '"' && self.char != '\0' {
+                    if self.char == '\\' {
+                        self.read_char();
+                        match self.char {
+                            'n' => value.push('\n'),
+                            't' => value.push('\t'),
+                            '"' => value.push('"'),
+                            '\\' => value.push('\\'),
+                            other => value.push(other),
+                        }
+                    } else {
+                        value.push(self.char);
+                    }
+                    self.read_char();
+                }
+
+                let span = (self.peek_pos - initial_pos) as u32; // Calculate span before consuming the closing quote
+                self.read_char(); // consume closing quote
+                return Token::new(
+                    TokenType::StringLiteral,
+                    value,
+                    start_row,
+                    start_col,
+                    span,
+                );
+            }
+            '\'' => Token::new(
+                TokenType::SingleQt,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
+            '<' => Token::new(TokenType::Lt, self.char.to_string(), self.row, self.col, 1),
+            '>' => Token::new(TokenType::Gt, self.char.to_string(), self.row, self.col, 1),
+            ':' => Token::new(
+                TokenType::Colon,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
+            ';' => Token::new(
+                TokenType::Semi,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
+            ',' => Token::new(
+                TokenType::Comma,
+                self.char.to_string(),
+                self.row,
+                self.col,
+                1,
+            ),
+            '.' => Token::new(TokenType::Dot, self.char.to_string(), self.row, self.col, 1),
+            '\0' => Token::new(TokenType::Eof, "".to_string(), self.row, self.col, 1),
             _ => {
                 if self.is_letter() {
+                    let start_row = self.row;
+                    let start_col = self.col;
                     let lexeme = self.read_identifier();
-                    let token_type = self.determine_token_type(&lexeme);
-                    return Token::new(token_type, lexeme);
+                    let span = lexeme.len() as u32;
+
+                    let first_char = lexeme.chars().next().unwrap_or('a');
+                    let token_type = if first_char.is_uppercase() {
+                        TokenType::CapIdent
+                    } else {
+                        self.determine_token_type(&lexeme)
+                    };
+
+                    return Token::new(token_type, lexeme, start_row, start_col, span);
                 } else if self.is_digit() {
+                    let start_row = self.row;
+                    let start_col = self.col;
                     let lexeme = self.read_number();
-                    return Token::new(TokenType::Digit, lexeme);
+                    let span = lexeme.len() as u32;
+                    return Token::new(TokenType::Digit, lexeme, start_row, start_col, span);
                 } else {
-                    Token::new(TokenType::Illegal, self.char.to_string())
+                    Token::new(
+                        TokenType::Illegal,
+                        self.char.to_string(),
+                        self.row,
+                        self.col,
+                        1,
+                    )
                 }
             }
         };
@@ -294,4 +474,3 @@ impl Lexer {
         token
     }
 }
-

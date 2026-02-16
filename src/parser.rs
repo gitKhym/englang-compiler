@@ -5,7 +5,8 @@ use crate::{
     ast::{
         ArrayLiteralExpr, AssignmentStatement, BinOpExpr, BlockStatement, ClassDefStatement, Expr,
         FuncCallExpr, FuncDefExpr, FuncDefStatement, IfStatement, IndexExpr, MemberAccessExpr,
-        Program, ReturnStatement, Statement, TypedIdent, UnOpExpr, VarDeclStatement,
+        Program, RecordLiteralExpr, ReturnStatement, Statement, TypedIdent, UnOpExpr,
+        VarDeclStatement,
     },
     lexer::{Lexer, Token, TokenType, VarType},
 };
@@ -43,6 +44,20 @@ impl Parser {
         self.next_token.token_type == token_type
     }
 
+    pub fn peek(&self, n: usize) -> Token {
+        match n {
+            0 => self.curr_token.clone(),
+            1 => self.next_token.clone(),
+            _ => {
+                let mut clone_lexer = self.lexer.clone();
+                let mut token = self.next_token.clone();
+                for _ in 2..=n {
+                    token = clone_lexer.get_token();
+                }
+                token
+            }
+        }
+    }
     pub fn expect(&mut self, token_type: TokenType) -> Result<Token, String> {
         if self.curr_token.token_type == token_type {
             let old_token = self.curr_token.clone();
@@ -62,7 +77,7 @@ impl Parser {
                 self.consume_token();
                 var_type
             }
-            TokenType::Ident => {
+            TokenType::CapIdent => {
                 let name = self.curr_token.lexeme.clone();
                 self.consume_token();
                 VarType::Custom(name)
@@ -77,6 +92,29 @@ impl Parser {
         }
 
         var_type
+    }
+
+    fn consume_cap_ident(&mut self) -> String {
+        if let TokenType::CapIdent = self.curr_token.token_type {
+            let lexeme = self.curr_token.lexeme.clone();
+            self.consume_token();
+            lexeme
+        } else {
+            panic!(
+                "Classes require a capital letter at the start, got {:?} instead of {:?}",
+                self.curr_token.lexeme,
+                format!(
+                    "{}{}",
+                    self.curr_token
+                        .lexeme
+                        .chars()
+                        .next()
+                        .unwrap()
+                        .to_uppercase(),
+                    &self.curr_token.lexeme[1..]
+                )
+            );
+        }
     }
 
     fn consume_ident(&mut self) -> String {
@@ -110,7 +148,8 @@ impl Parser {
     // STATEMENTS
     fn parse_statement(&mut self) -> Statement {
         match self.curr_token.token_type {
-            TokenType::Type(_) => self.parse_var_decl_statement(),
+            TokenType::Type(_) | TokenType::CapIdent => self.parse_var_decl_statement(),
+
             TokenType::Return => self.parse_return_statement(),
             TokenType::If => self.parse_if_statement(),
             TokenType::Class => self.parse_class_def_statement(),
@@ -125,30 +164,39 @@ impl Parser {
                     Statement::Expression(expr)
                 }
             }
+
             TokenType::Ident => {
-                if self.next_token_is(TokenType::Ident) {
-                    return self.parse_var_decl_statement();
+                let expr = self.parse_expression(0);
+
+                match self.expect(TokenType::Semi) {
+                    Ok(_) => Statement::Expression(expr),
+                    Err(_) => Statement::Illegal,
                 }
-
-                Statement::Expression(self.parse_expression(0))
             }
-
-            _ => Statement::Expression(self.parse_expression(0)),
+            _ => panic!("Error {:#?}", self.curr_token),
         }
     }
 
     fn parse_expression(&mut self, min_bp: u8) -> Box<Expr> {
-        // Parse the prefix
+        // Parse the prefix / atomics
         let mut left: Box<Expr> = match &self.curr_token.token_type {
             TokenType::Fn => Box::new(self.parse_function_def_expression()),
 
-            TokenType::Ident => {
-                if self.next_token_is(TokenType::LParen) {
-                    Box::new(self.parse_function_call_expression())
-                } else {
-                    Box::new(Expr::Ident(self.consume_ident()))
-                }
+            TokenType::Ident => match self.next_token.token_type {
+                TokenType::LParen => Box::new(self.parse_function_call_expression()),
+                TokenType::LSquare => Box::new(self.parse_indexing_expression()),
+                _ => Box::new(Expr::Ident(self.consume_ident())),
+            },
+
+            TokenType::CapIdent => {
+                let identifier = self.consume_cap_ident();
+                let fields = self.parse_records();
+                Box::new(Expr::RecordLiteral(RecordLiteralExpr {
+                    identifier,
+                    fields,
+                }))
             }
+
             TokenType::Digit => Box::new(self.parse_int_expression()),
 
             TokenType::Null => {
@@ -202,11 +250,13 @@ impl Parser {
 
         // Parse postfix / infix operators
         loop {
+            println!("op is {:#?}", self.curr_token);
             match self.curr_token.token_type {
                 TokenType::Eof | TokenType::Semi | TokenType::RParen => break,
 
                 // Binary / infix operators
-                TokenType::Plus
+                TokenType::Assign
+                | TokenType::Plus
                 | TokenType::Minus
                 | TokenType::Mult
                 | TokenType::Div
@@ -224,6 +274,10 @@ impl Parser {
 
                 // Postfix operators
                 TokenType::Dot => {
+                    let (l_bp, r_bp) = self.infix_binding_power(&TokenType::Dot);
+                    if l_bp < min_bp {
+                        break;
+                    }
                     self.consume_token();
                     let member = match self.curr_token.token_type {
                         TokenType::Ident => self.consume_ident(),
@@ -233,22 +287,44 @@ impl Parser {
                         object: left,
                         field: member,
                     }));
+                    continue;
                 }
-
                 TokenType::LSquare => {
-                    self.consume_token(); // consume '['
-                    let mut elements = Vec::new();
+                    let (l_bp, r_bp) = self.infix_binding_power(&TokenType::LSquare);
+                    if l_bp < min_bp {
+                        break;
+                    }
+                    self.consume_token(); // consume LSquare
+                    let index_expr = self.parse_expression(0);
+                    self.expect(TokenType::RSquare).unwrap();
+                    left = Box::new(Expr::Index(IndexExpr {
+                        object: left,
+                        index: index_expr,
+                    }));
+                    continue;
+                }
+                TokenType::LParen => {
+                    let (l_bp, r_bp) = self.infix_binding_power(&TokenType::LParen);
+                    if l_bp < min_bp {
+                        break;
+                    }
+                    self.consume_token(); // consume LParen
 
-                    if !self.curr_token_is(TokenType::RSquare) {
-                        elements.push(self.parse_expression(0));
+                    let mut args: Vec<Box<Expr>> = Vec::new();
+
+                    if !self.curr_token_is(TokenType::RParen) {
+                        args.push(self.parse_expression(0));
+
                         while self.curr_token_is(TokenType::Comma) {
-                            self.consume_token();
-                            elements.push(self.parse_expression(0));
+                            self.expect(TokenType::Comma).unwrap();
+                            args.push(self.parse_expression(0));
                         }
                     }
 
-                    self.expect(TokenType::RSquare).unwrap();
-                    left = Box::new(Expr::ArrayLiteral(ArrayLiteralExpr { elements }))
+                    self.expect(TokenType::RParen).unwrap(); // consume RParen
+
+                    left = Box::new(Expr::FuncCall(FuncCallExpr { callee: left, args }));
+                    continue;
                 }
 
                 TokenType::Bang => {
@@ -275,10 +351,13 @@ impl Parser {
 
     fn infix_binding_power(&mut self, op: &TokenType) -> (u8, u8) {
         match op {
-            TokenType::Eq | TokenType::Neq => (0, 1),
-            TokenType::Plus | TokenType::Minus => (1, 2),
-            TokenType::Mult | TokenType::Div => (3, 4),
+            TokenType::Assign => (0, 1),
+            TokenType::Eq | TokenType::Neq => (1, 2),
+            TokenType::Plus | TokenType::Minus => (3, 4),
+            TokenType::Mult | TokenType::Div => (5, 6),
             TokenType::Dot => (9, 10),
+            TokenType::LSquare => (9, 10),
+            TokenType::LParen => (9, 10),
             _ => panic!("bad op: {:?}", op),
         }
     }
@@ -289,6 +368,32 @@ impl Parser {
         self.consume_token();
 
         Expr::Int(int)
+    }
+
+    fn parse_records(&mut self) -> Vec<(String, Box<Expr>)> {
+        self.expect(TokenType::LCurl).unwrap();
+
+        let mut fields: Vec<(String, Box<Expr>)> = Vec::new();
+
+        while !self.curr_token_is(TokenType::RCurl) {
+            let ident = self.consume_ident();
+
+            self.expect(TokenType::Colon).unwrap();
+
+            let value = self.parse_expression(0);
+
+            fields.push((ident, value));
+
+            if self.curr_token_is(TokenType::Comma) {
+                self.consume_token();
+            } else {
+                break;
+            }
+        }
+
+        self.expect(TokenType::RCurl).unwrap();
+
+        fields
     }
 
     // (VARTYPE IDENT)[]
@@ -340,7 +445,8 @@ impl Parser {
         })
     }
     fn parse_function_call_expression(&mut self) -> Expr {
-        let identifier = self.consume_ident(); // Consume IDENT
+        let identifier_lexeme = self.consume_ident(); // Consume IDENT
+        let callee = Box::new(Expr::Ident(identifier_lexeme));
 
         self.expect(TokenType::LParen).unwrap(); // Consume LPAREN
 
@@ -348,7 +454,7 @@ impl Parser {
 
         if self.curr_token_is(TokenType::RParen) {
             self.consume_token(); // consume RParen
-            return Expr::FuncCall(FuncCallExpr { identifier, args });
+            return Expr::FuncCall(FuncCallExpr { callee, args });
         }
 
         args.push(self.parse_expression(0));
@@ -360,7 +466,21 @@ impl Parser {
 
         self.expect(TokenType::RParen).unwrap(); // Consume RPAREN
 
-        Expr::FuncCall(FuncCallExpr { identifier, args })
+        Expr::FuncCall(FuncCallExpr { callee, args })
+    }
+
+    fn parse_indexing_expression(&mut self) -> Expr {
+        let identifier_lexeme = self.consume_ident(); // Consumes the IDENT
+        let object_expr = Box::new(Expr::Ident(identifier_lexeme));
+
+        self.expect(TokenType::LSquare).unwrap();
+        let index = self.parse_expression(0);
+        self.expect(TokenType::RSquare).unwrap();
+
+        Expr::Index(IndexExpr {
+            object: object_expr,
+            index,
+        })
     }
 
     // BlockStatement: LCURL STATEMENT[] RCURL
@@ -472,11 +592,11 @@ impl Parser {
         })
     }
 
-    // ClassDefStatement: CLASS IDENT LCURL TYPEDIDENT[] RCURL
+    // ClassDefStatement: CLASS CAPIDENT LCURL TYPEDIDENT[] RCURL
     fn parse_class_def_statement(&mut self) -> Statement {
         self.expect(TokenType::Class).unwrap();
 
-        let identifier = self.consume_ident();
+        let identifier = self.consume_cap_ident();
 
         self.expect(TokenType::LCurl).unwrap();
 
