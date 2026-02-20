@@ -1,5 +1,6 @@
-impl Person {
-  fn construct(string name, int age, bool is_alive) -> Self {
-    return Person { name: "George"};
-  }
+int x = 2;
+int y = x; 
+
+if (x == y) {
+  return x;
 }

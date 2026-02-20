@@ -1,9 +1,11 @@
 use std::{env, fs, path::Path};
 
 mod ast;
+mod evaluate;
 mod lexer;
 mod parser;
 
+use evaluate::Evaluator;
 use lexer::{Lexer, TokenType};
 use parser::Parser;
 
@@ -35,5 +37,11 @@ fn main() {
     let mut parser = Parser::new(lexer);
     let program = parser.parse_program();
 
-    println!("{:#?}", program);
+    let mut evaluator = Evaluator::new(program.clone());
+    let evaluation_result = evaluator.eval_program();
+
+    match evaluation_result {
+        Some(obj) => println!("Evaluation Result: {:#?}", obj),
+        None => println!("Evaluation did not produce a final value."),
+    }
 }

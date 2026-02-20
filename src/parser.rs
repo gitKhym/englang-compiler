@@ -138,7 +138,7 @@ impl Parser {
                 }
             }
 
-            TokenType::Ident => {
+            TokenType::Ident | TokenType::Digit => {
                 let expr = self.parse_expression(0);
 
                 match self.expect(TokenType::Semi) {
@@ -161,14 +161,19 @@ impl Parser {
                 _ => Box::new(Expr::Ident(self.get_string_from_token(&TokenType::Ident))),
             },
 
-            TokenType::CapIdent => {
-                let identifier = self.get_string_from_token(&TokenType::CapIdent);
-                let fields = self.parse_records();
-                Box::new(Expr::RecordLiteral(RecordLiteralExpr {
-                    identifier,
-                    fields,
-                }))
-            }
+            TokenType::CapIdent => match self.next_token.token_type {
+                TokenType::LCurl => {
+                    let identifier = self.get_string_from_token(&TokenType::CapIdent);
+                    let fields = self.parse_records();
+                    Box::new(Expr::RecordLiteral(RecordLiteralExpr {
+                        identifier,
+                        fields,
+                    }))
+                }
+                _ => Box::new(Expr::Ident(
+                    self.get_string_from_token(&TokenType::CapIdent),
+                )),
+            },
 
             TokenType::Digit => Box::new(self.parse_int_expression()),
 
@@ -227,7 +232,6 @@ impl Parser {
 
         // Parse postfix / infix operators
         loop {
-            println!("op is {:#?}", self.curr_token);
             match self.curr_token.token_type {
                 TokenType::Eof | TokenType::Semi | TokenType::RParen => break,
 
@@ -257,7 +261,9 @@ impl Parser {
                     }
                     self.consume_token();
                     let member = match self.curr_token.token_type {
-                        TokenType::Ident => self.get_string_from_token(&TokenType::Ident),
+                        TokenType::Ident | TokenType::CapIdent => {
+                            self.get_string_from_token(&TokenType::Ident)
+                        }
                         _ => panic!("Expected identifier after '.'"),
                     };
                     left = Box::new(Expr::MemberAccess(MemberAccessExpr {
@@ -597,9 +603,7 @@ impl Parser {
 
         let mut implementations: Vec<FuncDefStatement> = Vec::new();
         while !self.curr_token_is(&TokenType::RCurl) {
-            println!("Will parse statement in next line");
             let stmt = self.parse_function_def_statement();
-            println!("Next token is {:#?}", self.next_token);
             match stmt {
                 Statement::FuncDef(func_def) => implementations.push(func_def),
                 _ => panic!(
